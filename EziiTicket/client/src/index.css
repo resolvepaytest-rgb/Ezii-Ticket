@@ -1,0 +1,150 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 240 10% 3.9%;
+
+    --radius: 0.5rem;
+  }
+
+  /*
+    Brand tokens (centralized)
+    Set via: document.documentElement.dataset.brand = "ezii" | "resolve" | "client"
+    Ezii palette: Primary #1E88E5, Secondary #475569, Tertiary #CC6C00, Neutral #F8FAFC
+    Resolve: #4F8EF7 | Client / NGO: #FB9745
+  */
+  :root,
+  :root[data-brand="ezii"] {
+    /* Primary #1E88E5 */
+    --brand: 207 79% 51%;
+    --brand-2: 207 70% 62%;
+    --brand-secondary: 215 19% 35%;
+    --brand-tertiary: 32 100% 40%;
+    --brand-neutral: 210 40% 98%;
+    --primary: var(--brand);
+  }
+
+  :root[data-brand="resolve"] {
+    /* #4F8EF7 */
+    --brand: 218 91% 64%;
+    --brand-2: 198 93% 60%;
+    --primary: var(--brand);
+  }
+
+  :root[data-brand="client"] {
+    /* #FB9745 */
+    --brand: 27 96% 63%;
+    --brand-2: 48 96% 53%;
+    --primary: var(--brand);
+  }
+
+  .dark {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 240 4.9% 83.9%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Keep native select/dropdown options readable in dark mode */
+  select {
+    color: hsl(var(--foreground));
+  }
+
+  select option {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+  }
+}
+
+@layer utilities {
+  /* Slim scrollbar (WebKit + Firefox); use on overflow-y-auto regions */
+  .scrollbar-slim {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.35) transparent;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar {
+    width: 3px;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background-color: hsl(var(--muted-foreground) / 0.35);
+  }
+
+  .scrollbar-slim::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.55);
+  }
+}
+
+/* Smooth glass background */
+body {
+  background:
+    radial-gradient(900px 400px at 15% 10%, hsl(var(--brand) / 0.22), transparent 60%),
+    radial-gradient(900px 400px at 85% 15%, hsl(var(--brand-2) / 0.18), transparent 60%),
+    radial-gradient(800px 450px at 55% 90%, hsl(var(--brand) / 0.14), transparent 65%),
+    hsl(var(--background));
+}

@@ -1,0 +1,159 @@
+{
+  "info": {
+    "name": "EziiTicket Phase 2",
+    "_postman_id": "8f4e2ecf-2b92-4db9-8e36-3f9cbec4c2fa",
+    "description": "Phase 2 workflow tests: status transitions, reopen, escalate, assign/reassign.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create Ticket",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt_token}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"product_id\": {{product_id}},\n  \"category_id\": {{category_id}},\n  \"subcategory_id\": {{subcategory_id}},\n  \"channel\": \"widget\",\n  \"priority\": \"P3\",\n  \"affected_users\": 12,\n  \"subject\": \"Phase2 flow test ticket\",\n  \"description\": \"This ticket is created to verify status transitions, reopen rules, escalation and assignment endpoints.\"\n}"
+        },
+        "url": { "raw": "{{baseUrl}}/tickets", "host": ["{{baseUrl}}"], "path": ["tickets"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 201', function () { pm.response.to.have.status(201); });",
+              "const json = pm.response.json();",
+              "if (json && json.data) { pm.collectionVariables.set('ticket_id', String(json.data.id)); }"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Set Pending (open -> pending)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt_token}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"pending\",\n  \"reason\": \"waiting_for_customer_input\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/tickets/{{ticket_id}}/status",
+          "host": ["{{baseUrl}}"],
+          "path": ["tickets", "{{ticket_id}}", "status"]
+        }
+      }
+    },
+    {
+      "name": "Set Resolved (pending -> resolved)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt_token}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"status\": \"resolved\",\n  \"resolution_note\": \"Issue validated and fixed through configuration correction, cache refresh, and end-user retest confirmation.\",\n  \"reason\": \"issue_fixed\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/tickets/{{ticket_id}}/status",
+          "host": ["{{baseUrl}}"],
+          "path": ["tickets", "{{ticket_id}}", "status"]
+        }
+      }
+    },
+    {
+      "name": "Reopen (within 7 days)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt_token}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"reason\": \"Issue reoccurred after re-login\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/tickets/{{ticket_id}}/reopen",
+          "host": ["{{baseUrl}}"],
+          "path": ["tickets", "{{ticket_id}}", "reopen"]
+        }
+      }
+    },
+    {
+      "name": "Manual Escalate",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt_token}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"target_team_id\": {{target_team_id}},\n  \"target_queue_id\": {{target_queue_id}},\n  \"handoff_note\": \"Escalating with logs and impact summary attached.\",\n  \"reason\": \"complexity\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/tickets/{{ticket_id}}/escalate",
+          "host": ["{{baseUrl}}"],
+          "path": ["tickets", "{{ticket_id}}", "escalate"]
+        }
+      }
+    },
+    {
+      "name": "Assign / Reassign",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt_token}}", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"assignee_user_id\": {{assignee_user_id}},\n  \"team_id\": {{target_team_id}},\n  \"queue_id\": {{target_queue_id}}\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/tickets/{{ticket_id}}/assign",
+          "host": ["{{baseUrl}}"],
+          "path": ["tickets", "{{ticket_id}}", "assign"]
+        }
+      }
+    },
+    {
+      "name": "Ticket Detail (verify events)",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{jwt_token}}", "type": "text" }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/tickets/{{ticket_id}}",
+          "host": ["{{baseUrl}}"],
+          "path": ["tickets", "{{ticket_id}}"]
+        }
+      }
+    }
+  ],
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:5000" },
+    { "key": "jwt_token", "value": "" },
+    { "key": "product_id", "value": "1" },
+    { "key": "category_id", "value": "86" },
+    { "key": "subcategory_id", "value": "254" },
+    { "key": "target_team_id", "value": "18" },
+    { "key": "target_queue_id", "value": "15" },
+    { "key": "assignee_user_id", "value": "900001" },
+    { "key": "ticket_id", "value": "" }
+  ]
+}
+

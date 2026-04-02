@@ -1,0 +1,52 @@
+import { createApp } from "./app.js";
+import { env } from "./config/env.js";
+import { pool } from "./db/pool.js";
+import { ensureStorageDirs } from "./storage/ensureStorageDirs.js";
+import { runAutoCloseTick, runSlaTick } from "./services/automation/ticketLifecycle.js";
+
+async function logDbConnectionOnce() {
+  if (!env.databaseUrl) {
+    return;
+  }
+
+  try {
+    await pool.query("select 1 as ok");
+    // eslint-disable-next-line no-console
+    console.log("[db] connected successfully");
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn("[db] connection failed:", (err as Error).message);
+  }
+}
+
+const app = createApp();
+
+app.listen(env.port, () => {
+  // eslint-disable-next-line no-console
+  console.log(`[server] listening on http://localhost:${env.port}`);
+  void ensureStorageDirs().catch((err) => {
+    // eslint-disable-next-line no-console
+    console.warn("[storage] ensureStorageDirs failed:", (err as Error).message);
+  });
+  void logDbConnectionOnce();
+
+  if (env.enableTicketAutomation) {
+    const slaMs = Math.max(15, env.slaTickSeconds) * 1000;
+    const autoCloseMs = Math.max(30, env.autoCloseTickSeconds) * 1000;
+
+    setInterval(() => {
+      void runSlaTick().catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[automation] runSlaTick failed:", (err as Error).message);
+      });
+    }, slaMs);
+
+    setInterval(() => {
+      void runAutoCloseTick().catch((err) => {
+        // eslint-disable-next-line no-console
+        console.warn("[automation] runAutoCloseTick failed:", (err as Error).message);
+      });
+    }, autoCloseMs);
+  }
+});
+

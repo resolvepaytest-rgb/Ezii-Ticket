@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2400" height="1500" viewBox="0 0 2400 1500">
+  <defs>
+    <style>
+      .bg { fill: #0b1020; }
+      .card { fill: rgba(255,255,255,0.06); stroke: rgba(255,255,255,0.14); stroke-width: 1.2; }
+      .cardA { fill: rgba(37,99,235,0.10); stroke: rgba(37,99,235,0.42); stroke-width: 1.3; }
+      .cardB { fill: rgba(79,142,247,0.10); stroke: rgba(79,142,247,0.44); stroke-width: 1.3; }
+      .cardC { fill: rgba(251,151,69,0.10); stroke: rgba(251,151,69,0.44); stroke-width: 1.3; }
+      .title { font: 700 22px system-ui, -apple-system, Segoe UI, Roboto, Arial; fill: #f5f7ff; }
+      .h { font: 700 15px system-ui, -apple-system, Segoe UI, Roboto, Arial; fill: #f5f7ff; }
+      .t { font: 500 12.5px system-ui, -apple-system, Segoe UI, Roboto, Arial; fill: rgba(245,247,255,0.86); }
+      .mut { fill: rgba(245,247,255,0.60); }
+      .mono { font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: rgba(245,247,255,0.86); }
+      .pill { fill: rgba(255,255,255,0.08); stroke: rgba(255,255,255,0.14); stroke-width: 1; }
+      .link { stroke: rgba(255,255,255,0.20); stroke-width: 2; fill: none; }
+      .link2 { stroke: rgba(37,99,235,0.55); stroke-width: 2.2; fill: none; }
+      .dot { fill: rgba(37,99,235,0.95); }
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="2400" height="1500"/>
+
+  <!-- CENTER -->
+  <g filter="url(#shadow)">
+    <rect class="cardA" x="945" y="650" width="510" height="170" rx="18"/>
+    <text class="title" x="1200" y="705" text-anchor="middle">ETS Best DB Schema (Merged)</text>
+    <text class="t mut" x="1200" y="735" text-anchor="middle">PRD-driven + your ERD docx • scalable &amp; maintainable</text>
+    <rect class="pill" x="1015" y="755" width="370" height="40" rx="20"/>
+    <text class="t" x="1200" y="782" text-anchor="middle">IDs: <tspan class="mono">bigint</tspan> (or UUID) • all FKs indexed</text>
+  </g>
+
+  <!-- Connectors -->
+  <path class="link2" d="M945 735 C 770 690, 650 620, 520 520"/>
+  <path class="link2" d="M945 785 C 780 875, 650 980, 520 1120"/>
+  <path class="link2" d="M1455 735 C 1620 690, 1740 620, 1880 520"/>
+  <path class="link2" d="M1455 785 C 1620 875, 1740 980, 1880 1120"/>
+  <path class="link2" d="M1200 650 C 1200 520, 1200 420, 1200 270"/>
+
+  <!-- TOP: Tenant & Config -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="760" y="70" width="880" height="330" rx="16"/>
+    <text class="h" x="790" y="110">Tenant &amp; Configuration</text>
+
+    <text class="t" x="790" y="150">organisation</text>
+    <text class="t mut" x="940" y="150">id, name, support_email, timezone, created_at, updated_at</text>
+
+    <text class="t" x="790" y="180">organisation_setting</text>
+    <text class="t mut" x="1000" y="180">org_id(FK), business_hours_definition, holiday_calendar, is_ngo, ticket_retention_months</text>
+
+    <text class="t" x="790" y="210">data_retention_policy</text>
+    <text class="t mut" x="990" y="210">org_id(FK), closed_ticket_retention_months, audit_log_retention_months, pii_masking_rules</text>
+
+    <text class="t" x="790" y="250">product</text>
+    <text class="t mut" x="900" y="250">id, code(PAY/LEA/ATT/EXP), name, default_ticket_prefix</text>
+
+    <text class="t" x="790" y="280">organisation_product</text>
+    <text class="t mut" x="1000" y="280">org_id(FK), product_id(FK), default_routing_queue_id(FK), enabled</text>
+
+    <text class="t" x="790" y="310">queue</text>
+    <text class="t mut" x="900" y="310">id, org_id(FK), product_id(FK), team_id(FK), name</text>
+
+    <text class="t" x="790" y="340">category / subcategory</text>
+    <text class="t mut" x="1020" y="340">category(product_id, is_active), subcategory(category_id, is_active)</text>
+
+    <text class="t" x="790" y="370">custom_field</text>
+    <text class="t mut" x="920" y="370">id, product_id(FK), name, code, field_type, is_required, is_customer_visible, config_options</text>
+  </g>
+
+  <!-- LEFT: Identity & RBAC -->
+  <g filter="url(#shadow)">
+    <rect class="cardB" x="80" y="360" width="640" height="420" rx="16"/>
+    <text class="h" x="110" y="400">Identity, Teams &amp; RBAC</text>
+
+    <text class="t" x="110" y="440">user</text>
+    <text class="t mut" x="170" y="440">id (PK), user_id (external, unique), organisation_id(FK), name, email, phone, user_type, status, created_at, updated_at</text>
+
+    <text class="t" x="110" y="470">role</text>
+    <text class="t mut" x="170" y="470">id, name, description</text>
+
+    <text class="t" x="110" y="500">user_role</text>
+    <text class="t mut" x="210" y="500">id, user_id(FK ? user.id), role_id(FK), scope_organisation_id(optional), created_at</text>
+
+    <text class="t" x="110" y="540">team</text>
+    <text class="t mut" x="170" y="540">id, organisation_id(FK), product_id(FK), tier(L1/L2/L3), name</text>
+
+    <text class="t" x="110" y="570">team_member</text>
+    <text class="t mut" x="240" y="570">id, team_id(FK), user_id(FK ? user.id), is_team_lead, max_open_tickets_cap</text>
+
+    <text class="t" x="110" y="610">ticket_follower</text>
+    <text class="t mut" x="250" y="610">id, ticket_id(FK), user_id(FK), created_at</text>
+
+    <text class="t" x="110" y="650">JWT claims (runtime)</text>
+    <text class="t mut" x="270" y="650">org_id, user_id, role_name, user_type_id... used in middleware</text>
+  </g>
+
+  <!-- LEFT-BOTTOM: Ticketing -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="60" y="880" width="700" height="560" rx="16"/>
+    <text class="h" x="90" y="920">Ticketing Core (Phase 1+)</text>
+
+    <text class="t" x="90" y="960">ticket</text>
+    <text class="t mut" x="160" y="960">id, organisation_id(FK), ticket_number(UNQ), product_id(FK), category_id(FK), subcategory_id(FK)</text>
+    <text class="t mut" x="160" y="982">reporter_id(FK), assignee_id(FK), queue_id(FK), status, priority, channel, affected_users_count</text>
+    <text class="t mut" x="160" y="1004">tier1_policy_id(FK), tier2_policy_id(FK), created_at, updated_at, first_response_at, resolved_at, closed_at, escalated_at, cancelled_at</text>
+
+    <text class="t" x="90" y="1040">ticket_message</text>
+    <text class="t mut" x="230" y="1040">id, ticket_id(FK), sender_id(FK), sender_role_snapshot, channel, body_richtext, is_internal_note, created_at</text>
+
+    <text class="t" x="90" y="1070">ticket_attachment</text>
+    <text class="t mut" x="250" y="1070">id, ticket_id(FK), uploaded_by_id(FK), file_name, file_url, mime_type, size_bytes, created_at</text>
+
+    <text class="t" x="90" y="1100">ticket_tag</text>
+    <text class="t mut" x="190" y="1100">id, ticket_id(FK), tag_value, created_at</text>
+
+    <text class="t" x="90" y="1130">ticket_status_history</text>
+    <text class="t mut" x="290" y="1130">id, ticket_id(FK), previous_status, new_status, changed_by_id(FK), change_reason, created_at</text>
+
+    <text class="t" x="90" y="1165">ticket_sla_timer</text>
+    <text class="t mut" x="240" y="1165">id, ticket_id(FK), tier, priority_snapshot, target_first_response_at, target_resolution_at, started_at</text>
+    <text class="t mut" x="240" y="1187">paused_from, total_paused_minutes, breach_warning_at, breached_at</text>
+
+    <text class="t" x="90" y="1220">escalation + escalation_handoff_note</text>
+    <text class="t mut" x="410" y="1220">escalation(ticket_id, tiers, trigger_type) + handoff fields (summary, steps, impact, tried...)</text>
+
+    <text class="t" x="90" y="1255">ticket_context (widget)</text>
+    <text class="t mut" x="270" y="1255">ticket_id(FK unique), context_json, created_at</text>
+
+    <text class="t" x="90" y="1285">ticket_custom_field</text>
+    <text class="t mut" x="270" y="1285">ticket_id(FK), custom_field_id(FK), value_text/value_number/value_date</text>
+
+    <text class="t" x="90" y="1320">csat_response</text>
+    <text class="t mut" x="220" y="1320">id, ticket_id(FK), respondent_id(FK), rating(1-5), comment_text, submitted_at</text>
+
+    <text class="t" x="90" y="1350">ticket_audit_trail (optional)</text>
+    <text class="t mut" x="320" y="1350">id, ticket_id(FK), actor_id(FK), action_type, field_name, old_value, new_value, created_at</text>
+  </g>
+
+  <!-- RIGHT: SLA Policies + Routing -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="1600" y="360" width="760" height="420" rx="16"/>
+    <text class="h" x="1630" y="400">SLA Policies &amp; Routing</text>
+
+    <text class="t" x="1630" y="440">sla_policy_tier1</text>
+    <text class="t mut" x="1780" y="440">id, organisation_id(FK), priority(P1..P4), first_response_target_minutes, resolution_target_minutes, visible_to_customer</text>
+
+    <text class="t" x="1630" y="470">sla_policy_tier2</text>
+    <text class="t mut" x="1780" y="470">id, priority, l2_ack_minutes, l2_resolution_or_pass_to_l3_minutes, l3_ack_minutes, l3_resolution_minutes</text>
+
+    <text class="t" x="1630" y="510">routing_rule</text>
+    <text class="t mut" x="1750" y="510">id, organisation_id(FK), name, priority_order, is_active</text>
+
+    <text class="t" x="1630" y="540">routing_rule_condition</text>
+    <text class="t mut" x="1830" y="540">id, routing_rule_id(FK), field, operator, value</text>
+
+    <text class="t" x="1630" y="570">routing_rule_action</text>
+    <text class="t mut" x="1800" y="570">id, routing_rule_id(FK), action_type, action_value</text>
+
+    <text class="t" x="1630" y="610">keyword_trigger</text>
+    <text class="t mut" x="1760" y="610">id, product_id(FK), phrase, is_active (P1 auto-escalation)</text>
+
+    <text class="t" x="1630" y="650">queue assignment</text>
+    <text class="t mut" x="1760" y="650">queue.team_id + team_member caps support load balancing</text>
+  </g>
+
+  <!-- RIGHT-BOTTOM: Notifications + Audit -->
+  <g filter="url(#shadow)">
+    <rect class="cardC" x="1550" y="880" width="820" height="560" rx="16"/>
+    <text class="h" x="1580" y="920">Notifications, Audit &amp; Admin</text>
+
+    <text class="t" x="1580" y="960">notification_template</text>
+    <text class="t mut" x="1785" y="960">id, event_type, default_channels, subject_template, body_template, is_editable_by_customer_admin</text>
+
+    <text class="t" x="1580" y="990">notification</text>
+    <text class="t mut" x="1690" y="990">id, user_id(FK), ticket_id(FK), event_type, channel, template_id(FK), delivery_status, created_at, read_at</text>
+
+    <text class="t" x="1580" y="1030">admin_audit_log</text>
+    <text class="t mut" x="1740" y="1030">id, actor_id(FK), section, action_type, target_id, old_value, new_value, created_at</text>
+
+    <text class="t" x="1580" y="1060">canned_response</text>
+    <text class="t mut" x="1720" y="1060">id, organisation_id(FK), product_id(nullable), title, body, is_active</text>
+
+    <text class="t" x="1580" y="1100">email-to-ticket (Phase 1)</text>
+    <text class="t mut" x="1795" y="1100">ingestion stores into ticket + ticket_message + ticket_attachment; threading by ticket_number in subject</text>
+
+    <text class="t" x="1580" y="1140">PII masking &amp; retention</text>
+    <text class="t mut" x="1760" y="1140">data_retention_policy drives pruning + masking for exports/logs</text>
+  </g>
+
+  <!-- Relationship cheat sheet -->
+  <g filter="url(#shadow)">
+    <rect class="pill" x="780" y="440" width="840" height="140" rx="16"/>
+    <text class="h" x="810" y="475">Relationship cheat-sheet</text>
+    <text class="t" x="810" y="505">organisation 1?N user/team/queue/ticket/notification/admin_audit_log/settings/retention/routing_rule</text>
+    <text class="t" x="810" y="528">product 1?N category?subcategory; organisation N?N product via organisation_product</text>
+    <text class="t" x="810" y="551">ticket 1?N message/attachment/tag/history/sla_timer/escalation; 1?1 context; 1?N follower; 1?1 csat_response</text>
+  </g>
+
+  <!-- Legend -->
+  <g>
+    <rect class="pill" x="20" y="20" width="560" height="36" rx="18"/>
+    <circle class="dot" cx="46" cy="38" r="5"/>
+    <text class="t" x="66" y="42">This SVG is the recommended schema: normalized where it matters, extensible for Phase 2-4</text>
+  </g>
+</svg>
+

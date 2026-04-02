@@ -1,0 +1,184 @@
+{
+  "info": {
+    "name": "EziiTicket Phase 1.2",
+    "_postman_id": "cb6a3d6a-2f40-4fd3-b4c2-c15f3042f19d",
+    "description": "Phase 1.2 test flow: create -> queue list -> detail -> message.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Create Ticket",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"product_id\": {{product_id}},\n  \"category_id\": {{category_id}},\n  \"subcategory_id\": {{subcategory_id}},\n  \"channel\": \"widget\",\n  \"priority\": \"P3\",\n  \"affected_users\": 12,\n  \"subject\": \"Payroll bulk upload fails for March run\",\n  \"description\": \"Payroll bulk upload fails with a validation mismatch for multiple employees. Please help with diagnostics.\",\n  \"metadata_json\": {\n    \"screen\": \"Payroll > Run Summary\",\n    \"client_version\": \"phase1.2-postman\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/tickets",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "tickets"
+          ]
+        }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('status is 201', function () {",
+              "  pm.response.to.have.status(201);",
+              "});",
+              "const json = pm.response.json();",
+              "if (json && json.data) {",
+              "  pm.collectionVariables.set('ticket_id', String(json.data.id));",
+              "  if (json.data.queue_id !== null && json.data.queue_id !== undefined) {",
+              "    pm.collectionVariables.set('queue_id', String(json.data.queue_id));",
+              "  }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Queue List (GET /tickets)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/tickets?status=open&priority=P3&limit=20",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "tickets"
+          ],
+          "query": [
+            {
+              "key": "status",
+              "value": "open"
+            },
+            {
+              "key": "priority",
+              "value": "P3"
+            },
+            {
+              "key": "limit",
+              "value": "20"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "Ticket Detail (GET /tickets/:id)",
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/tickets/{{ticket_id}}",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "tickets",
+            "{{ticket_id}}"
+          ]
+        }
+      }
+    },
+    {
+      "name": "Add Message (POST /tickets/:id/messages)",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{jwt_token}}",
+            "type": "text"
+          },
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"body\": \"Additional context: issue impacts users across two departments and started after yesterday update.\"\n}"
+        },
+        "url": {
+          "raw": "{{baseUrl}}/tickets/{{ticket_id}}/messages",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "tickets",
+            "{{ticket_id}}",
+            "messages"
+          ]
+        }
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000"
+    },
+    {
+      "key": "jwt_token",
+      "value": ""
+    },
+    {
+      "key": "product_id",
+      "value": "1"
+    },
+    {
+      "key": "category_id",
+      "value": "86"
+    },
+    {
+      "key": "subcategory_id",
+      "value": "254"
+    },
+    {
+      "key": "ticket_id",
+      "value": ""
+    },
+    {
+      "key": "queue_id",
+      "value": ""
+    }
+  ]
+}
+

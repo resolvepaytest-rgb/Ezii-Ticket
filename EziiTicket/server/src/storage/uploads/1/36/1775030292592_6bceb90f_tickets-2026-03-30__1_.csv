@@ -1,0 +1,6 @@
+ticket_code,subject,status,priority,product,updated_at
+ATT--00002,"biometric data loss",open,P1,Attendance,2026-03-30T05:03:24.403Z
+EXP--00001,"data corruption",escalated,P1,Expense,2026-03-29T18:33:07.453Z
+PAY--00009,"Salary not transfer",open,P3,Payroll,2026-03-29T13:44:47.402Z
+LEA--00001,"Leave balance not showing",open,P3,Leave,2026-03-29T12:37:25.657Z
+ATT--00001,"Wrong Shift Assigned show",open,P3,Attendance,2026-03-29T11:31:19.212Z

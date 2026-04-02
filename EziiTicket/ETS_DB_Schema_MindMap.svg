@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="2200" height="1350" viewBox="0 0 2200 1350">
+  <defs>
+    <style>
+      .bg { fill: #0b1020; }
+      .card { fill: rgba(255,255,255,0.06); stroke: rgba(255,255,255,0.14); stroke-width: 1.2; }
+      .cardA { fill: rgba(37,99,235,0.10); stroke: rgba(37,99,235,0.40); stroke-width: 1.3; } /* EZII */
+      .cardB { fill: rgba(79,142,247,0.10); stroke: rgba(79,142,247,0.42); stroke-width: 1.3; } /* Resolve */
+      .cardC { fill: rgba(251,151,69,0.10); stroke: rgba(251,151,69,0.42); stroke-width: 1.3; } /* NGO */
+      .title { font: 700 22px system-ui, -apple-system, Segoe UI, Roboto, Arial; fill: #f5f7ff; }
+      .h { font: 700 15px system-ui, -apple-system, Segoe UI, Roboto, Arial; fill: #f5f7ff; }
+      .t { font: 500 12.5px system-ui, -apple-system, Segoe UI, Roboto, Arial; fill: rgba(245,247,255,0.86); }
+      .mut { fill: rgba(245,247,255,0.60); }
+      .link { stroke: rgba(255,255,255,0.20); stroke-width: 2; fill: none; }
+      .link2 { stroke: rgba(37,99,235,0.55); stroke-width: 2.2; fill: none; }
+      .dot { fill: rgba(37,99,235,0.95); }
+      .pill { fill: rgba(255,255,255,0.08); stroke: rgba(255,255,255,0.14); stroke-width: 1; }
+      .mono { font: 600 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; fill: rgba(245,247,255,0.86); }
+    </style>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="14" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="2200" height="1350"/>
+
+  <!-- CENTER -->
+  <g filter="url(#shadow)">
+    <rect class="cardA" x="890" y="585" width="420" height="150" rx="18"/>
+    <text class="title" x="1100" y="635" text-anchor="middle">ETS Database Schema (Postgres)</text>
+    <text class="t mut" x="1100" y="662" text-anchor="middle">Multi-tenant • RBAC • Tickets • SLA • Notifications • Audit</text>
+    <rect class="pill" x="970" y="684" width="260" height="34" rx="17"/>
+    <text class="t" x="1100" y="706" text-anchor="middle">Primary key: <tspan class="mono">id</tspan> (UUID/BigInt)</text>
+  </g>
+
+  <!-- Links from center -->
+  <path class="link2" d="M890 660 C 720 610, 620 550, 500 460"/>
+  <path class="link2" d="M890 710 C 720 800, 620 870, 500 980"/>
+  <path class="link2" d="M1310 660 C 1470 610, 1580 560, 1720 470"/>
+  <path class="link2" d="M1310 710 C 1470 800, 1580 880, 1720 990"/>
+  <path class="link2" d="M1100 585 C 1100 470, 1100 390, 1100 250"/>
+
+  <!-- TOP: Tenant & Config -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="760" y="70" width="680" height="320" rx="16"/>
+    <text class="h" x="790" y="110">Tenant &amp; Configuration</text>
+
+    <text class="t" x="790" y="145">organizations</text>
+    <text class="t mut" x="920" y="145">PK id, name, logo_url, timezone, support_email, business_hours_json, portal_subdomain</text>
+
+    <text class="t" x="790" y="175">products</text>
+    <text class="t mut" x="920" y="175">PK id, code(PAY/LEA/ATT/EXP), name, default_prefix, default_queue_name</text>
+
+    <text class="t" x="790" y="205">organization_products</text>
+    <text class="t mut" x="980" y="205">PK(org_id, product_id), enabled</text>
+
+    <text class="t" x="790" y="235">queues</text>
+    <text class="t mut" x="920" y="235">PK id, org_id(FK), product_id(FK), name</text>
+
+    <text class="t" x="790" y="265">routing_rules</text>
+    <text class="t mut" x="920" y="265">PK id, org_id(FK), priority_order, conditions_json, actions_json, is_active</text>
+
+    <text class="t" x="790" y="295">ticket_categories / ticket_subcategories</text>
+    <text class="t mut" x="1080" y="295">categories: product_id(FK) • subcats: category_id(FK)</text>
+
+    <text class="t" x="790" y="325">custom_fields</text>
+    <text class="t mut" x="920" y="325">PK id, org_id(FK), product_id(FK), field_type, required, internal_only, config_json</text>
+  </g>
+
+  <!-- LEFT: Identity & RBAC -->
+  <g filter="url(#shadow)">
+    <rect class="cardB" x="90" y="300" width="560" height="360" rx="16"/>
+    <text class="h" x="120" y="340">Identity &amp; RBAC</text>
+
+    <text class="t" x="120" y="375">users</text>
+    <text class="t mut" x="210" y="375">PK id, org_id(FK), email, full_name, user_type_id, is_active</text>
+
+    <text class="t" x="120" y="405">roles</text>
+    <text class="t mut" x="210" y="405">PK id, name(customer/org_admin/l1/l2/l3/team_lead/system_admin)</text>
+
+    <text class="t" x="120" y="435">user_roles</text>
+    <text class="t mut" x="210" y="435">PK(user_id, role_id) (many-to-many)</text>
+
+    <text class="t" x="120" y="465">teams</text>
+    <text class="t mut" x="210" y="465">PK id, org_id(FK), name</text>
+
+    <text class="t" x="120" y="495">team_members</text>
+    <text class="t mut" x="250" y="495">PK(team_id, user_id)</text>
+
+    <text class="t" x="120" y="525">agent skills / product assignment (optional)</text>
+    <text class="t mut" x="390" y="525">e.g., team ↔ product, queue ↔ team, round-robin</text>
+
+    <text class="t" x="120" y="565">Auth token claims (JWT)</text>
+    <text class="t mut" x="330" y="565">org_id, user_id, role_name, etc. (from your payload)</text>
+  </g>
+
+  <!-- LEFT-BOTTOM: Tickets core -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="70" y="760" width="620" height="520" rx="16"/>
+    <text class="h" x="100" y="800">Ticketing Core</text>
+
+    <text class="t" x="100" y="835">tickets</text>
+    <text class="t mut" x="200" y="835">PK id, org_id(FK), ticket_key(UNQ), channel(widget/portal/email), product_id(FK)</text>
+    <text class="t mut" x="200" y="857">category_id(FK), subcategory_id(FK nullable), subject, description, priority(P1..P4), status</text>
+    <text class="t mut" x="200" y="879">reporter_user_id(FK), assigned_user_id(FK nullable), assigned_queue_id(FK nullable), timestamps</text>
+
+    <text class="t" x="100" y="915">ticket_messages</text>
+    <text class="t mut" x="250" y="915">PK id, ticket_id(FK), sender_user_id(FK), message_type(customer/agent/internal/system), body</text>
+
+    <text class="t" x="100" y="945">ticket_attachments</text>
+    <text class="t mut" x="270" y="945">PK id, ticket_id(FK), message_id(FK nullable), uploader_user_id(FK), file metadata + storage_url</text>
+
+    <text class="t" x="100" y="975">ticket_tags</text>
+    <text class="t mut" x="210" y="975">PK(ticket_id, tag)</text>
+
+    <text class="t" x="100" y="1005">ticket_context</text>
+    <text class="t mut" x="240" y="1005">PK id, ticket_id(FK unique), context_json (widget app context)</text>
+
+    <text class="t" x="100" y="1035">ticket_escalations</text>
+    <text class="t mut" x="270" y="1035">PK id, ticket_id(FK), from_tier, to_tier, reason, handoff_note_json, created_by_user_id(FK)</text>
+
+    <text class="t" x="100" y="1070">ticket_custom_field_values</text>
+    <text class="t mut" x="340" y="1070">PK(ticket_id, custom_field_id), value_json</text>
+
+    <text class="t" x="100" y="1110">csat_surveys</text>
+    <text class="t mut" x="220" y="1110">PK id, ticket_id(FK unique), rating(1-5), comment, submitted_at, low_score_followup_created</text>
+  </g>
+
+  <!-- RIGHT: SLA -->
+  <g filter="url(#shadow)">
+    <rect class="card" x="1530" y="310" width="610" height="350" rx="16"/>
+    <text class="h" x="1560" y="350">SLA &amp; Timers</text>
+
+    <text class="t" x="1560" y="385">sla_policies</text>
+    <text class="t mut" x="1680" y="385">PK id, tier(1/2), priority(P1..P4), first_response_min, resolution_min</text>
+    <text class="t mut" x="1680" y="407">ack_minutes(nullable for tier1), applies_to_org_id(nullable override), is_active</text>
+
+    <text class="t" x="1560" y="445">ticket_sla_events</text>
+    <text class="t mut" x="1710" y="445">PK id, ticket_id(FK), tier(1/2), metric(first_response/resolution/ack)</text>
+    <text class="t mut" x="1710" y="467">started_at, paused_at(nullable), due_at, warning_at(75%), breached_at(nullable)</text>
+
+    <text class="t" x="1560" y="505">business hours / holidays</text>
+    <text class="t mut" x="1760" y="505">store per org in organizations.business_hours_json + holiday calendar table (optional)</text>
+
+    <text class="t" x="1560" y="540">keyword auto-escalation</text>
+    <text class="t mut" x="1750" y="540">part of routing_rules (conditions/actions)</text>
+  </g>
+
+  <!-- RIGHT-BOTTOM: Notifications + Audit -->
+  <g filter="url(#shadow)">
+    <rect class="cardC" x="1480" y="760" width="680" height="520" rx="16"/>
+    <text class="h" x="1510" y="800">Notifications • Audit • Admin Tools</text>
+
+    <text class="t" x="1510" y="835">notifications</text>
+    <text class="t mut" x="1650" y="835">PK id, org_id(FK), user_id(FK), ticket_id(FK nullable), type, channel(email/in_app), is_read</text>
+
+    <text class="t" x="1510" y="865">notification_templates</text>
+    <text class="t mut" x="1720" y="865">PK id, org_id(nullable global), trigger_event, channel, subject_template, body_template</text>
+
+    <text class="t" x="1510" y="905">audit_log</text>
+    <text class="t mut" x="1600" y="905">PK id, org_id(FK), actor_user_id(FK), entity_type, entity_id, action, old/new json, created_at</text>
+
+    <text class="t" x="1510" y="945">canned_responses</text>
+    <text class="t mut" x="1670" y="945">PK id, org_id(FK), product_id(nullable), title, body, is_active</text>
+
+    <text class="t" x="1510" y="985">email-to-ticket (future)</text>
+    <text class="t mut" x="1720" y="985">inbound mailbox config + message threading using ticket_key</text>
+
+    <text class="t" x="1510" y="1025">webhooks (optional)</text>
+    <text class="t mut" x="1650" y="1025">webhook_endpoints + delivery log per event</text>
+
+    <text class="t" x="1510" y="1060">reports/dashboards (derived)</text>
+    <text class="t mut" x="1750" y="1060">materialized views or OLAP later (Phase 4)</text>
+  </g>
+
+  <!-- Relationship hints (mind map style) -->
+  <g>
+    <rect class="pill" x="760" y="420" width="680" height="120" rx="16"/>
+    <text class="h" x="790" y="455">Relationship cheat-sheet (high-signal)</text>
+    <text class="t" x="790" y="480">organizations 1→N users, teams, queues, tickets, notifications, audit_log, routing_rules, custom_fields</text>
+    <text class="t" x="790" y="502">products 1→N categories → subcategories; organizations N↔N products via organization_products</text>
+    <text class="t" x="790" y="524">tickets 1→N messages, attachments, sla_events, escalations; 1→1 context; 1→1 csat_survey; N↔N custom_fields via ticket_custom_field_values</text>
+  </g>
+
+  <!-- Legend -->
+  <g>
+    <rect class="pill" x="20" y="20" width="460" height="34" rx="17"/>
+    <circle class="dot" cx="45" cy="37" r="5"/>
+    <text class="t" x="62" y="41">Detailed DB mind map • derived from PRD (Phase 1-3 core + config/audit)</text>
+  </g>
+</svg>
