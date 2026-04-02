@@ -11,6 +11,10 @@ export function createApp() {
   assertPermissionKeyNamingConventions();
   const app = express();
 
+  app.use('/health',(req,res)=>{
+    res.json({ok:true, time:new Date().toISOString()})
+  })
+
   app.use(cors());
   app.use(express.json({ limit: "1mb" }));
   app.use(morgan("dev"));
