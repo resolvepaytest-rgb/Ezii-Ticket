@@ -15,7 +15,9 @@ export class HttpError extends Error {
 }
 
 export function getApiBaseUrl() {
-  return import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || "/api";
+  const raw = import.meta.env.VITE_API_URL || import.meta.env.VITE_API_BASE || "/api";
+  // Prevent double slashes when callers use paths like `/health`
+  return (raw ?? "").toString().replace(/\/$/, "");
 }
 
 function getAuthToken() {
