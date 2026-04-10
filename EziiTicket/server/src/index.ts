@@ -14,8 +14,17 @@ async function logDbConnectionOnce() {
     // eslint-disable-next-line no-console
     console.log("[db] connected successfully");
   } catch (err) {
+    const e = err as NodeJS.ErrnoException & { errors?: unknown[] };
+    const detail = [
+      e?.message,
+      e?.code,
+      e?.cause instanceof Error ? e.cause.message : undefined,
+      Array.isArray(e.errors) ? e.errors.map((x) => (x instanceof Error ? x.message : String(x))).join("; ") : undefined,
+    ]
+      .filter(Boolean)
+      .join(" | ");
     // eslint-disable-next-line no-console
-    console.warn("[db] connection failed:", (err as Error).message);
+    console.warn("[db] connection failed:", detail || String(err));
   }
 }
 

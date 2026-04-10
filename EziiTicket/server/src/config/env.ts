@@ -6,7 +6,8 @@ dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   port: Number(process.env.PORT ?? 5000),
-  databaseUrl: process.env.DATABASE_URL ?? "",
+  /** Trimmed so Windows `.env` CRLF / stray spaces do not break the URL parser or TLS/SNI. */
+  databaseUrl: (process.env.DATABASE_URL ?? "").trim(),
   jwtSecret: process.env.JWT_SECRET ?? "",
   jwtIssuer: process.env.JWT_ISSUER ?? "",
   jwtAudience: process.env.JWT_AUDIENCE ?? "",

@@ -2,6 +2,6 @@
   "watch": ["src"],
   "ext": "ts,json",
   "ignore": ["dist", "node_modules"],
-  "exec": "tsx watch src/index.ts"
+  "exec": "node --dns-result-order=ipv4first ./node_modules/tsx/dist/cli.mjs watch src/index.ts"
 }
 
