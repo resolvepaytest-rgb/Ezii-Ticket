@@ -10,8 +10,6 @@ import {
 } from "@api/ticketApi";
 import { toast } from "sonner";
 import { Loader } from "@components/common/Loader";
-import * as XLSX from "xlsx";
-import mammoth from "mammoth";
 
 type RaiseTicketPageProps = {
   onCreated?: (ticketId: number) => void;
@@ -123,6 +121,7 @@ export function RaiseTicketPage({ onCreated }: RaiseTicketPageProps) {
       const lowerName = file.name.toLowerCase();
       try {
         if (lowerName.endsWith(".csv")) {
+          const XLSX = await import("xlsx");
           const text = await file.text();
           const workbook = XLSX.read(text, { type: "string" });
           const sheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
@@ -139,6 +138,7 @@ export function RaiseTicketPage({ onCreated }: RaiseTicketPageProps) {
         }
 
         if (lowerName.endsWith(".xlsx")) {
+          const XLSX = await import("xlsx");
           const buf = await file.arrayBuffer();
           const workbook = XLSX.read(buf, { type: "array" });
           const sheet = workbook.Sheets[workbook.SheetNames[0] ?? ""];
@@ -155,8 +155,9 @@ export function RaiseTicketPage({ onCreated }: RaiseTicketPageProps) {
         }
 
         if (lowerName.endsWith(".docx")) {
+          const { extractRawText } = await import("mammoth");
           const arrayBuffer = await file.arrayBuffer();
-          const result = await mammoth.extractRawText({ arrayBuffer });
+          const result = await extractRawText({ arrayBuffer });
           const text = result.value.replace(/\s+/g, " ").trim();
           return text ? { kind: "text", text: text.slice(0, 350) } : { kind: "none" };
         }

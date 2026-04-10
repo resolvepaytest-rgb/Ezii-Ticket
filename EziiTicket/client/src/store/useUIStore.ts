@@ -22,7 +22,7 @@ export const useUIStore = create<UIState>()(
       setBrand: (brand) => set({ brand }),
       toggleMode: () => set((s) => ({ mode: s.mode === "dark" ? "light" : "dark" })),
     }),
-    { name: "ezii-ticket:ui" }
+    { name: "ui" }
   )
 );
 

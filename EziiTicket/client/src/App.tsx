@@ -29,30 +29,9 @@ import {
   type ScreenAccessMap,
 } from "@/config/roleScreenMap";
 import type { ActionAccessMap } from "@/config/permissionKeys";
-import { OrganizationsPage } from "@pages/admin/OrganizationsPage";
-import { ProductsPage } from "@pages/admin/ProductsPage";
-import { UsersRolesPage } from "@pages/admin/UsersRolesPage";
-import { TeamsQueuesPage } from "@pages/admin/TeamsQueuesPage";
-import { RoutingRulesPage } from "@pages/admin/RoutingRulesPage";
-import { PriorityMasterPage } from "@pages/admin/PriorityMasterPage";
-import { KeywordsRoutingPage } from "@pages/admin/KeywordsRoutingPage";
-import { SlaPoliciesPage } from "@pages/admin/SlaPoliciesPage";
-import { NotificationTemplatesPage } from "@pages/admin/NotificationTemplatesPage";
-import { CannedResponsesPage } from "@pages/admin/CannedResponsesPage";
-import { CustomFieldsPage } from "@pages/admin/CustomFieldsPage";
-import { ApiWebhooksPage } from "@pages/admin/ApiWebhooksPage";
-import { AdminAuditLogPage } from "@pages/admin/AdminAuditLogPage";
-import { SystemOverviewDashboardPage } from "@pages/dashboard/SystemOverviewDashboardPage";
-import { TeamDashboardPage } from "@pages/dashboard/TeamDashboardPage";
-import { SystemTicketsPage } from "@pages/dashboard/SystemTicketsPage";
-import { RolesPage } from "@pages/admin/RolesPage";
-import { AgentsPage } from "@pages/admin/AgentsPage";
-import { RaiseTicketPage } from "@pages/tickets/RaiseTicketPage";
 import { CreateTicketDrawer } from "@components/tickets/CreateTicketDrawer";
-import { MyTicketsPage } from "@pages/tickets/MyTicketsPage";
-import { AgentTeamQueuePage } from "@pages/tickets/AgentTeamQueuePage";
-import { AgentHistoryPage } from "@pages/tickets/AgentHistoryPage";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { LayoutDashboard } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -62,10 +41,90 @@ import {
   type UserNotification,
 } from "@api/notificationApi";
 
-const ACTIVE_NAV_STORAGE_KEY = "ezii-ticket:active-nav";
-const ACTIVE_ORG_STORAGE_KEY = "ezii-ticket:active-org-id";
-const DASHBOARD_VIEW_MODE_STORAGE_KEY = "ezii-ticket:view-mode";
-const DASHBOARD_REFRESH_STORAGE_KEY = "ezii-ticket:dashboard-refresh-seconds";
+const OrganizationsPage = lazy(() =>
+  import("@pages/admin/OrganizationsPage").then((m) => ({ default: m.OrganizationsPage }))
+);
+const ProductsPage = lazy(() =>
+  import("@pages/admin/ProductsPage").then((m) => ({ default: m.ProductsPage }))
+);
+const UsersRolesPage = lazy(() =>
+  import("@pages/admin/UsersRolesPage").then((m) => ({ default: m.UsersRolesPage }))
+);
+const TeamsQueuesPage = lazy(() =>
+  import("@pages/admin/TeamsQueuesPage").then((m) => ({ default: m.TeamsQueuesPage }))
+);
+const RoutingRulesPage = lazy(() =>
+  import("@pages/admin/RoutingRulesPage").then((m) => ({ default: m.RoutingRulesPage }))
+);
+const PriorityMasterPage = lazy(() =>
+  import("@pages/admin/PriorityMasterPage").then((m) => ({ default: m.PriorityMasterPage }))
+);
+const KeywordsRoutingPage = lazy(() =>
+  import("@pages/admin/KeywordsRoutingPage").then((m) => ({ default: m.KeywordsRoutingPage }))
+);
+const SlaPoliciesPage = lazy(() =>
+  import("@pages/admin/SlaPoliciesPage").then((m) => ({ default: m.SlaPoliciesPage }))
+);
+const NotificationTemplatesPage = lazy(() =>
+  import("@pages/admin/NotificationTemplatesPage").then((m) => ({ default: m.NotificationTemplatesPage }))
+);
+const CannedResponsesPage = lazy(() =>
+  import("@pages/admin/CannedResponsesPage").then((m) => ({ default: m.CannedResponsesPage }))
+);
+const CustomFieldsPage = lazy(() =>
+  import("@pages/admin/CustomFieldsPage").then((m) => ({ default: m.CustomFieldsPage }))
+);
+const ApiWebhooksPage = lazy(() =>
+  import("@pages/admin/ApiWebhooksPage").then((m) => ({ default: m.ApiWebhooksPage }))
+);
+const AdminAuditLogPage = lazy(() =>
+  import("@pages/admin/AdminAuditLogPage").then((m) => ({ default: m.AdminAuditLogPage }))
+);
+const SystemOverviewDashboardPage = lazy(() =>
+  import("@pages/dashboard/SystemOverviewDashboardPage").then((m) => ({ default: m.SystemOverviewDashboardPage }))
+);
+const TeamDashboardPage = lazy(() =>
+  import("@pages/dashboard/TeamDashboardPage").then((m) => ({ default: m.TeamDashboardPage }))
+);
+const SystemTicketsPage = lazy(() =>
+  import("@pages/dashboard/SystemTicketsPage").then((m) => ({ default: m.SystemTicketsPage }))
+);
+const RolesPage = lazy(() =>
+  import("@pages/admin/RolesPage").then((m) => ({ default: m.RolesPage }))
+);
+const AgentsPage = lazy(() =>
+  import("@pages/admin/AgentsPage").then((m) => ({ default: m.AgentsPage }))
+);
+const RaiseTicketPage = lazy(() =>
+  import("@pages/tickets/RaiseTicketPage").then((m) => ({ default: m.RaiseTicketPage }))
+);
+const MyTicketsPage = lazy(() =>
+  import("@pages/tickets/MyTicketsPage").then((m) => ({ default: m.MyTicketsPage }))
+);
+const AgentTeamQueuePage = lazy(() =>
+  import("@pages/tickets/AgentTeamQueuePage").then((m) => ({ default: m.AgentTeamQueuePage }))
+);
+const AgentHistoryPage = lazy(() =>
+  import("@pages/tickets/AgentHistoryPage").then((m) => ({ default: m.AgentHistoryPage }))
+);
+
+function preloadFrequentPages() {
+  void Promise.allSettled([
+    import("@pages/admin/UsersRolesPage"),
+    import("@pages/admin/RolesPage"),
+    import("@pages/admin/TeamsQueuesPage"),
+    import("@pages/admin/RoutingRulesPage"),
+    import("@pages/admin/OrganizationsPage"),
+    import("@pages/admin/PriorityMasterPage"),
+    import("@pages/admin/KeywordsRoutingPage"),
+    import("@pages/admin/SlaPoliciesPage"),
+    import("@pages/admin/CannedResponsesPage"),
+  ]);
+}
+
+const ACTIVE_ORG_STORAGE_KEY = "active-org-id";
+const DASHBOARD_VIEW_MODE_STORAGE_KEY = "view-mode";
+const DASHBOARD_REFRESH_STORAGE_KEY = "dashboard-refresh-seconds";
 
 const NAV_PATH_MAP: Record<string, string> = {
   org_dashboard: "/dashboard",
@@ -419,8 +478,10 @@ function writeStorage(key: string, value: string | null) {
 }
 
 export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [activeNav, setActiveNav] = useState(
-    () => readStorage(ACTIVE_NAV_STORAGE_KEY) ?? "agent_dashboard"
+    () => navKeyFromPath(location.pathname, "agent") ?? "agent_dashboard"
   );
   const [viewMode, setViewMode] = useState<"team" | "my_view">(
     () =>
@@ -493,8 +554,8 @@ export default function App() {
     // If opened via magic-link:
     // - /auth/login/:orgId/:token
     // - /id/:token
-    // store token in localStorage and validate once.
-    const parts = window.location.pathname.split("/").filter(Boolean);
+    // store token in localStorage once.
+    const parts = location.pathname.split("/").filter(Boolean);
     let handled = false;
     if (parts.length === 4 && parts[0] === "auth" && parts[1] === "login") {
       const orgId = parts[2]!;
@@ -523,9 +584,12 @@ export default function App() {
 
     if (handled) {
       setActiveNav("agent_dashboard");
-      window.history.replaceState({}, "", "/");
+      navigate("/", { replace: true });
     }
+  }, [location.pathname, navigate]);
 
+  useEffect(() => {
+    // Load user claims once on app startup (avoid full-shell reload on every route change)
     // Load user claims (if token exists)
     void (async () => {
       setAuthLoading(true);
@@ -540,7 +604,6 @@ export default function App() {
         setAuthLoading(false);
       }
     })();
-
   }, [setUser]);
 
   useEffect(() => {
@@ -619,26 +682,24 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    writeStorage(ACTIVE_NAV_STORAGE_KEY, activeNav);
-  }, [activeNav]);
-
-  useEffect(() => {
+    if (!user) return;
     writeStorage(DASHBOARD_VIEW_MODE_STORAGE_KEY, viewMode);
-  }, [viewMode]);
+  }, [viewMode, user]);
 
   useEffect(() => {
+    if (!user) return;
     writeStorage(DASHBOARD_REFRESH_STORAGE_KEY, String(dashboardRefreshSeconds));
-  }, [dashboardRefreshSeconds]);
+  }, [dashboardRefreshSeconds, user]);
 
   useEffect(() => {
+    if (!user) return;
     writeStorage(ACTIVE_ORG_STORAGE_KEY, activeOrgId);
-  }, [activeOrgId]);
+  }, [activeOrgId, user]);
 
   const handleLogout = () => {
-    writeStorage(ACTIVE_NAV_STORAGE_KEY, "agent_dashboard");
     writeStorage(ACTIVE_ORG_STORAGE_KEY, null);
-    writeStorage(DASHBOARD_VIEW_MODE_STORAGE_KEY, "team");
-    writeStorage(DASHBOARD_REFRESH_STORAGE_KEY, "60");
+    writeStorage(DASHBOARD_VIEW_MODE_STORAGE_KEY, null);
+    writeStorage(DASHBOARD_REFRESH_STORAGE_KEY, null);
     setActiveNav("agent_dashboard");
     setViewMode("team");
     setDashboardRefreshSeconds(60);
@@ -925,6 +986,8 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !permissionsLoaded) return;
+    // Preserve explicit route refreshes (e.g. /admin/users-roles); only enforce view bucket on dashboard route.
+    if (location.pathname !== "/dashboard") return;
     const splitSidebar =
       shellRoleKind !== "org_admin" &&
       ((isCustomerExperience && customerDashboardToggleEligible) ||
@@ -955,6 +1018,7 @@ export default function App() {
     activeNav,
     sidebarItemsForShell,
     sidebarItemsForMyViewBucket,
+    location.pathname,
   ]);
 
   useEffect(() => {
@@ -984,6 +1048,7 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (!user || !permissionsLoaded) return;
     if (hasCustomerScopedAccess && !canViewCustomerNavKey(activeNav, screenAccess)) {
       const filteredCustomerItems = filterSidebarByNavAccess(roleSidebarItems, (navKey) =>
         canViewCustomerNavKey(navKey, screenAccess)
@@ -1006,6 +1071,8 @@ export default function App() {
       setActiveNav(defaultDashboardNavKey(shellRoleKind));
     }
   }, [
+    user,
+    permissionsLoaded,
     hasCustomerScopedAccess,
     screenAccess,
     activeNav,
@@ -1091,21 +1158,17 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    const syncPathToNav = () => {
-      const next = navKeyFromPath(window.location.pathname, shellRoleKindRef.current);
-      if (next) setActiveNav(next);
-    };
-    syncPathToNav();
-    window.addEventListener("popstate", syncPathToNav);
-    return () => window.removeEventListener("popstate", syncPathToNav);
-  }, []);
+    const next = navKeyFromPath(location.pathname, shellRoleKindRef.current);
+    if (!next) return;
+    setActiveNav((prev) => (prev === next ? prev : next));
+  }, [location.pathname]);
 
   useEffect(() => {
     if (!user) return;
-    const next = navKeyFromPath(window.location.pathname, shellRoleKind);
+    const next = navKeyFromPath(location.pathname, shellRoleKind);
     if (!next) return;
     setActiveNav((prev) => (prev === next ? prev : next));
-  }, [user, shellRoleKind]);
+  }, [user, location.pathname, shellRoleKind]);
 
   useEffect(() => {
     if (!user) return;
@@ -1114,18 +1177,39 @@ export default function App() {
   }, [user, shellRoleKind, activeNav]);
 
   useEffect(() => {
+    if (!user) return;
+    const timer = window.setTimeout(() => {
+      preloadFrequentPages();
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [user]);
+
+  useEffect(() => {
     const targetPath = pathFromNavKey(activeNav);
-    const currentPath = window.location.pathname;
-    if (targetPath !== currentPath) {
-      window.history.pushState({}, "", targetPath);
+    if (targetPath !== location.pathname) {
+      navigate(targetPath);
     }
-  }, [activeNav]);
+  }, [activeNav, location.pathname, navigate]);
 
   if (authLoading || (user && !permissionsLoaded)) {
     return (
       <ThemeProvider>
         <AppToaster />
         <Loader label="Loading…" className="min-h-svh p-6" />
+      </ThemeProvider>
+    );
+  }
+
+  if (!user) {
+    return (
+      <ThemeProvider>
+        <AppToaster />
+        <div className="flex min-h-svh items-center justify-center p-6">
+          <div className="max-w-md rounded-xl border border-black/10 bg-background p-6 text-center shadow-sm dark:border-white/10">
+            <h1 className="text-xl font-semibold">Please login first</h1>
+            <p className="mt-2 text-sm text-muted-foreground">Please login first to access data.</p>
+          </div>
+        </div>
       </ThemeProvider>
     );
   }
@@ -1170,22 +1254,29 @@ export default function App() {
         onHeaderSupportClick={() => toast.message("Support — link help desk or docs here.")}
         onHeaderSettingsClick={() => toast.message("Settings — open org or profile settings from the sidebar.")}
       >
-        {profileLoading ? (
-          <div className="flex min-h-[70vh] w-full items-center justify-center text-sm text-muted-foreground">
-            <Loader label="Loading tenant..." size="sm" />
-          </div>
-        ) : profileError ? (
-          <div className="max-w-2xl text-sm">
-            <div className="text-red-300">{profileError}</div>
-          </div>
-        ) : !activeOrgId ? (
-          <div className="max-w-2xl text-sm text-muted-foreground">
-            No tenant selected.
-          </div>
-        ) : (
-          <>
-            {showSystemAdminChrome ? (
-              <>
+        <Suspense
+          fallback={
+            <div className="w-full py-3 text-sm text-muted-foreground">
+              <Loader label="Loading section..." size="sm" />
+            </div>
+          }
+        >
+          {profileLoading ? (
+            <div className="flex min-h-[70vh] w-full items-center justify-center text-sm text-muted-foreground">
+              <Loader label="Loading tenant..." size="sm" />
+            </div>
+          ) : profileError ? (
+            <div className="max-w-2xl text-sm">
+              <div className="text-red-300">{profileError}</div>
+            </div>
+          ) : !activeOrgId ? (
+            <div className="max-w-2xl text-sm text-muted-foreground">
+              No tenant selected.
+            </div>
+          ) : (
+            <>
+              {showSystemAdminChrome ? (
+                <>
                 {activeNav === "sys_dashboard" ? (
                   <SystemOverviewDashboardPage
                     orgId={activeOrgId}
@@ -1303,10 +1394,11 @@ export default function App() {
                     }
                   />
                 ) : null}
-              </>
-            )}
-          </>
-        )}
+                </>
+              )}
+            </>
+          )}
+        </Suspense>
       </AppShell>
 
       <CreateTicketDrawer
