@@ -74,6 +74,11 @@ export function Sidebar({
         <div className="my-3 h-px w-full bg-black/10 dark:bg-white/10" />
 
         <nav className="flex flex-col gap-1">
+          {items.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-black/15 bg-white/40 px-3 py-3 text-xs text-muted-foreground dark:border-white/20 dark:bg-white/5">
+              You don&apos;t have access.
+            </div>
+          ) : null}
           {items.map((it) => {
             const active = it.key === activeKey;
             const Icon = it.icon;

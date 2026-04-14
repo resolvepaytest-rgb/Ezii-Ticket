@@ -9,7 +9,6 @@ import { useAuthStore, type JwtUserClaims } from "@store/useAuthStore";
 import { useUIStore } from "@store/useUIStore";
 import { getExternalUserProfile, type ExternalUserProfile } from "@api/adminApi";
 import {
-  getAgentAdminViewSidebarItems,
   getEtsSidebarItemsForRole,
   getEtsSystemAdminSidebarItems,
   isSystemAdminExclusiveNavKey,
@@ -43,9 +42,6 @@ import {
 
 const OrganizationsPage = lazy(() =>
   import("@pages/admin/OrganizationsPage").then((m) => ({ default: m.OrganizationsPage }))
-);
-const ProductsPage = lazy(() =>
-  import("@pages/admin/ProductsPage").then((m) => ({ default: m.ProductsPage }))
 );
 const UsersRolesPage = lazy(() =>
   import("@pages/admin/UsersRolesPage").then((m) => ({ default: m.UsersRolesPage }))
@@ -225,7 +221,7 @@ const CUSTOMER_NAV_TO_SCREEN: Record<string, { primary: string; fallback?: strin
 
 const ORG_DASHBOARD_SIDEBAR_ITEM: SidebarItem = {
   key: "org_dashboard",
-  label: "Organisation Dashboard",
+  label: "Org Dashboard",
   icon: LayoutDashboard,
 };
 
@@ -236,6 +232,13 @@ const AGENT_NAV_TO_SCREEN: Record<string, string> = {
   agent_team_queue: "agent_team_queue",
   agent_history: "agent_history",
   workspace_module_c: "agent_reports",
+};
+
+/** Org admin shell nav keys → screen_access keys. */
+const ORG_ADMIN_NAV_TO_SCREEN: Record<string, string> = {
+  org_dashboard: "dashboard",
+  org_tickets: "tickets",
+  workspace_module_c: "dashboard",
 };
 
 /** Seed customer screen rows from legacy team keys when JSON predates split (read-only; no mirroring). */
@@ -259,6 +262,21 @@ function hasScreenViewAccess(
   // Keep runtime behavior aligned with RolesPage normalization (modify implies view).
   return Boolean(entry?.view || entry?.modify);
 }
+
+function hasAnyScreenViewAccess(
+  screenAccess: ScreenAccessMap | null | undefined,
+  keys: readonly string[]
+): boolean {
+  for (const key of keys) {
+    if (hasScreenViewAccess(screenAccess, key)) return true;
+  }
+  return false;
+}
+
+const ADMIN_TOGGLE_NAV_TO_SCREEN_KEYS = {
+  sys_agents: ["agent"] as const,
+  org_tickets: ["tickets"] as const,
+} as const;
 
 function normalizeScreenAccessForRuntime(
   input: ScreenAccessMap | null | undefined
@@ -326,7 +344,7 @@ function canViewCustomerNavKey(navKey: string, screenAccess: ScreenAccessMap | n
   const mapped = CUSTOMER_NAV_TO_SCREEN[navKey];
   if (!mapped) return true;
   // Customer navigation is strict: no screen_access means no customer-menu grant.
-  if (!screenAccess || Object.keys(screenAccess).length === 0) return true;
+  if (!screenAccess || Object.keys(screenAccess).length === 0) return false;
   const primary = hasScreenViewAccess(screenAccess, mapped.primary);
   const fallback = mapped.fallback ? hasScreenViewAccess(screenAccess, mapped.fallback) : false;
   return primary || fallback;
@@ -335,8 +353,19 @@ function canViewCustomerNavKey(navKey: string, screenAccess: ScreenAccessMap | n
 function canViewAgentNavKey(navKey: string, screenAccess: ScreenAccessMap | null | undefined): boolean {
   const screenKey = AGENT_NAV_TO_SCREEN[navKey];
   if (!screenKey) return true;
-  if (!screenAccess || Object.keys(screenAccess).length === 0) return true;
+  if (!screenAccess || Object.keys(screenAccess).length === 0) return false;
   return hasScreenViewAccess(screenAccess, screenKey);
+}
+
+function canViewOrgAdminNavKey(navKey: string, screenAccess: ScreenAccessMap | null | undefined): boolean {
+  const screenKey = ORG_ADMIN_NAV_TO_SCREEN[navKey];
+  if (!screenAccess || Object.keys(screenAccess).length === 0) return true;
+  if (screenKey) return hasScreenViewAccess(screenAccess, screenKey);
+  if (Object.prototype.hasOwnProperty.call(SYSTEM_ADMIN_NAV_TO_SCREEN, navKey)) {
+    return screenAccessAllowsSystemAdminNavKey(navKey, screenAccess);
+  }
+  if (!screenAccess || Object.keys(screenAccess).length === 0) return true;
+  return true;
 }
 
 function filterSidebarByNavAccess(
@@ -375,19 +404,20 @@ function filterSidebarByViewBucket(
   return out;
 }
 
-/** Agent shell → Admin toggle: org nav + System Configuration; filtered by org actions and screen_access. */
-function filterAgentAdminViewSidebar(
+/** Admin toggle (non-system shells): org-admin style nav, filtered by org actions and screen_access. */
+function filterAdminToggleSidebarByAccess(
   items: SidebarItem[],
   screenAccess: ScreenAccessMap | null | undefined,
   ctx: {
     canOpenOrgProducts: boolean;
     canOpenOrgUsersRoles: boolean;
+    canOpenAgentsScreen: boolean;
     canOpenOrgSlaPolicies: boolean;
     canOpenTicketList: boolean;
   },
   systemAdminFilterMode: FilterSystemAdminSidebarMode
 ): SidebarItem[] {
-  const { canOpenOrgProducts, canOpenOrgUsersRoles, canOpenOrgSlaPolicies, canOpenTicketList } = ctx;
+  const { canOpenOrgProducts, canOpenOrgUsersRoles, canOpenAgentsScreen, canOpenOrgSlaPolicies, canOpenTicketList } = ctx;
   const hasSa = Boolean(screenAccess && Object.keys(screenAccess).length > 0);
 
   const canOrgLeaf = (key: string): boolean => {
@@ -408,10 +438,12 @@ function filterAgentAdminViewSidebar(
     switch (key) {
       case "org_dashboard":
         return hasScreenViewAccess(screenAccess, "dashboard");
+      case "sys_agents":
+        return canOpenAgentsScreen;
       case "products":
         return canOpenOrgProducts;
       case "org_tickets":
-        return canOpenTicketList;
+        return canOpenTicketList || hasAnyScreenViewAccess(screenAccess, ADMIN_TOGGLE_NAV_TO_SCREEN_KEYS.org_tickets);
       case "org_sla_policies":
         return canOpenOrgSlaPolicies;
       case "workspace_module_c":
@@ -730,59 +762,70 @@ export default function App() {
       meAccessRoleNames.some((name) => name.toLowerCase().includes("system_admin")) ||
       meSupportLevelName?.toLowerCase().includes("system_admin")
   );
+  const noAccessAssigned = !isSystemAdminInterface && !hasAnyViewAccess;
   /** Primary role from `/auth/me/permissions` (falls back to JWT). Mis-set `tickets.list` on customer roles must not open agent shell. */
   const isPrimaryCustomerRole =
     normalizeRoleNameKeyForShell(meScopedRoleName ?? user?.role_name) === "customer";
-  const hasNonSystemWorkspaceFallback = !isSystemAdminInterface && hasAnyViewAccess;
-  const showCreateTicketButtonInSidebar = canDoAction(actionAccess, "tickets.create", hasNonSystemWorkspaceFallback);
-  const customerDashboardToggleEligible =
-    (canViewCustomerDashboard && canViewCustomerTickets) ||
-    (isPrimaryCustomerRole && hasScreenViewAccess(screenAccess, "dashboard"));
+  /** Keep shell chrome stable: org permissions alone must not force org-admin shell unless primary role is org_admin. */
+  const isPrimaryOrgAdminRole =
+    normalizeRoleNameKeyForShell(meScopedRoleName ?? user?.role_name) === "org_admin";
+  const showCreateTicketButtonInSidebar =
+    isSystemAdminInterface ||
+    canDoAction(actionAccess, "tickets.create", false) ||
+    canViewCustomerNavKey("cust_raise_ticket", screenAccess);
   const hasCustomerScopedAccess =
     canViewCustomerDashboard ||
     canViewCustomerTickets ||
     canViewCustomerNavKey("cust_raise_ticket", screenAccess) ||
     canViewCustomerNavKey("cust_guides", screenAccess) ||
     (isPrimaryCustomerRole && hasScreenViewAccess(screenAccess, "dashboard"));
-  const hasTeamTicketFallback = isSystemAdminInterface || (hasAnyViewAccess && !hasCustomerScopedAccess);
   const canOpenTicketList =
-    !isPrimaryCustomerRole &&
-    canDoAction(actionAccess, "tickets.list", hasTeamTicketFallback);
+    isSystemAdminInterface ||
+    hasAnyScreenViewAccess(screenAccess, ADMIN_TOGGLE_NAV_TO_SCREEN_KEYS.org_tickets);
   const canOpenMyTickets =
-    canDoAction(actionAccess, "tickets.list_my", hasNonSystemWorkspaceFallback) || canViewCustomerTickets;
+    isSystemAdminInterface ||
+    canDoAction(actionAccess, "tickets.list_my", false) ||
+    canViewCustomerTickets ||
+    hasScreenViewAccess(screenAccess, "agent_my_tickets");
   const canOpenRaiseTicket =
-    canDoAction(actionAccess, "tickets.create", hasNonSystemWorkspaceFallback) ||
+    isSystemAdminInterface ||
+    canDoAction(actionAccess, "tickets.create", false) ||
     canViewCustomerNavKey("cust_raise_ticket", screenAccess);
-  const hasOrgAdminNavProfile =
-    Boolean(actionAccess?.["products.read"]) ||
-    Boolean(actionAccess?.["users.read"]) ||
-    Boolean(actionAccess?.["sla.policies.manage"]) ||
-    hasScreenViewAccess(screenAccess, "users") ||
-    hasScreenViewAccess(screenAccess, "sla_policies");
   const canOpenOrgProducts =
-    !isPrimaryCustomerRole && canDoAction(actionAccess, "products.read", hasOrgAdminNavProfile);
+    isSystemAdminInterface ||
+    (!isPrimaryCustomerRole &&
+      (canDoAction(actionAccess, "products.read", false) || hasScreenViewAccess(screenAccess, "products")));
   const canOpenOrgUsersRoles =
-    !isPrimaryCustomerRole && canDoAction(actionAccess, "users.read", hasOrgAdminNavProfile);
+    isSystemAdminInterface ||
+    (!isPrimaryCustomerRole &&
+      (canDoAction(actionAccess, "users.read", false) || hasScreenViewAccess(screenAccess, "users")));
+  const canOpenAgentsScreen =
+    isSystemAdminInterface ||
+    hasAnyScreenViewAccess(screenAccess, ADMIN_TOGGLE_NAV_TO_SCREEN_KEYS.sys_agents);
   const canOpenOrgSlaPolicies =
-    !isPrimaryCustomerRole && canDoAction(actionAccess, "sla.policies.manage", hasOrgAdminNavProfile);
+    isSystemAdminInterface ||
+    (!isPrimaryCustomerRole &&
+      (canDoAction(actionAccess, "sla.policies.manage", false) || hasScreenViewAccess(screenAccess, "sla_policies")));
   const isCustomerExperience =
-    hasCustomerScopedAccess &&
-    !canOpenTicketList &&
-    !canOpenOrgProducts &&
-    !canOpenOrgUsersRoles &&
-    !canOpenOrgSlaPolicies;
+    isPrimaryCustomerRole ||
+    (hasCustomerScopedAccess &&
+      !canOpenTicketList &&
+      !canOpenOrgProducts &&
+      !canOpenOrgUsersRoles &&
+      !canOpenOrgSlaPolicies);
   /**
    * Shell template only: explicit **actions** (products.read / users.read / sla.policies.manage).
    * Do not use screen_access "users" alone — that was flipping team/agent to org_admin and killing My/Admin toggle.
    */
   const isOrgAdminShell =
     !isPrimaryCustomerRole &&
+    isPrimaryOrgAdminRole &&
     (canDoAction(actionAccess, "products.read", false) ||
       canDoAction(actionAccess, "users.read", false) ||
       canDoAction(actionAccess, "sla.policies.manage", false));
   const shellRoleKind: EtsAppRoleKind = isSystemAdminInterface
     ? "system_admin"
-    : isCustomerExperience
+    : isPrimaryCustomerRole || isCustomerExperience
       ? "customer"
       : isOrgAdminShell
         ? "org_admin"
@@ -847,24 +890,43 @@ export default function App() {
   const shellRoleKindRef = useRef(shellRoleKind);
   shellRoleKindRef.current = shellRoleKind;
 
-  /** Agent shell: keep My / Admin toggle even when `tickets.list` is on (org ticket list); otherwise toggle was hidden and sidebar merged into “admin only”. */
-  const teamDashboardToggleEligible =
-    !isSystemAdminInterface &&
-    canOpenMyTickets &&
-    hasAnyViewAccess &&
-    (shellRoleKind === "agent" || !canOpenTicketList);
-  /** My / Admin toggle: agents & customers only; not org admin or system admin. */
-  const showDashboardViewToggle =
-    shellRoleKind !== "org_admin" &&
-    !isSystemAdminInterface &&
-    (customerDashboardToggleEligible || teamDashboardToggleEligible);
-  const forceTeamDashboardView =
-    isSystemAdminInterface || (canOpenTicketList && shellRoleKind !== "agent");
-  const dashboardViewMode = forceTeamDashboardView ? "team" : showDashboardViewToggle ? viewMode : "my_view";
-
   const adminSidebarFilterMode = isSystemAdminInterface
     ? "showAllWhenNoPermissions"
     : "showNoneWhenNoPermissions";
+
+  const adminToggleItems = useMemo(
+    () =>
+      filterAdminToggleSidebarByAccess(
+        getEtsSidebarItemsForRole("org_admin"),
+        screenAccess,
+        {
+          canOpenOrgProducts,
+          canOpenOrgUsersRoles,
+          canOpenAgentsScreen,
+          canOpenOrgSlaPolicies,
+          canOpenTicketList,
+        },
+        adminSidebarFilterMode
+      ),
+    [
+      screenAccess,
+      canOpenOrgProducts,
+      canOpenOrgUsersRoles,
+      canOpenAgentsScreen,
+      canOpenOrgSlaPolicies,
+      canOpenTicketList,
+      adminSidebarFilterMode,
+    ]
+  );
+  const splitSidebarEligible =
+    !isSystemAdminInterface &&
+    shellRoleKind !== "org_admin" &&
+    (shellRoleKind === "customer" ? hasCustomerScopedAccess : adminToggleItems.length > 0);
+  const showDashboardViewToggle = splitSidebarEligible;
+  const forceTeamDashboardView =
+    isSystemAdminInterface ||
+    (canOpenTicketList && shellRoleKind !== "agent" && shellRoleKind !== "customer");
+  const dashboardViewMode = forceTeamDashboardView ? "team" : splitSidebarEligible ? viewMode : "my_view";
 
   const canRenderSystemAdminRoute = useCallback(
     (navKey: string) => {
@@ -886,6 +948,11 @@ export default function App() {
 
   /** Agent / team_lead shell: My view items respect `screen_access` Team/Agent keys. */
   const shellBaseSidebarItems = useMemo(() => {
+    if (shellRoleKind === "org_admin") {
+      return filterSidebarByNavAccess(roleSidebarItems, (navKey) =>
+        canViewOrgAdminNavKey(navKey, screenAccess)
+      );
+    }
     if (shellRoleKind !== "agent") return roleSidebarItems;
     return filterSidebarByNavAccess(roleSidebarItems, (navKey) =>
       canViewAgentNavKey(navKey, screenAccess)
@@ -903,10 +970,7 @@ export default function App() {
   }, [isCustomerExperience, screenAccess, shellBaseSidebarItems]);
 
   const sidebarItemsForShell = useMemo(() => {
-    const splitSidebar =
-      shellRoleKind !== "org_admin" &&
-      ((isCustomerExperience && customerDashboardToggleEligible) ||
-        (teamDashboardToggleEligible && !isCustomerExperience && !isSystemAdminInterface));
+    const splitSidebar = splitSidebarEligible;
 
     let adminFiltered = filterSystemAdminSidebarByScreenAccess(
       getEtsSystemAdminSidebarItems(),
@@ -920,22 +984,16 @@ export default function App() {
       return adminFiltered;
     }
 
-    /** Agent / team_lead (agent shell): My = agent nav only; Admin = org (112–124) + System Configuration (75–86), not merged with My. */
-    if (splitSidebar && shellRoleKind === "agent") {
+    if (shellRoleKind === "org_admin") {
+      return shellBaseSidebarItems;
+    }
+
+    /** For customer/agent/team_lead/custom shells, Admin toggle uses org-admin style menu. */
+    if (splitSidebar) {
       if (dashboardViewMode === "my_view") {
-        return shellBaseSidebarItems;
+        return sidebarItemsForMyViewBucket;
       }
-      return filterAgentAdminViewSidebar(
-        getAgentAdminViewSidebarItems(),
-        screenAccess,
-        {
-          canOpenOrgProducts,
-          canOpenOrgUsersRoles,
-          canOpenOrgSlaPolicies,
-          canOpenTicketList,
-        },
-        adminSidebarFilterMode
-      );
+      return adminToggleItems;
     }
 
     let combined: SidebarItem[];
@@ -943,6 +1001,7 @@ export default function App() {
       combined = sidebarItemsForMyViewBucket;
       if (hasAnySystemAdminScreenAccess(screenAccess)) {
         let grantForCustomer = removeSidebarKey(adminFiltered, "sys_dashboard");
+        grantForCustomer = removeSidebarKey(grantForCustomer, "partner_setup");
         if (screenAccessAllowsSystemAdminNavKey("sys_dashboard", screenAccess)) {
           grantForCustomer = [ORG_DASHBOARD_SIDEBAR_ITEM, ...grantForCustomer];
         }
@@ -976,22 +1035,16 @@ export default function App() {
     canOpenMyTickets,
     isCustomerExperience,
     isOrgAdminShell,
-    teamDashboardToggleEligible,
-    customerDashboardToggleEligible,
+    splitSidebarEligible,
     shellRoleKind,
-    canOpenOrgProducts,
-    canOpenOrgUsersRoles,
-    canOpenOrgSlaPolicies,
+    adminToggleItems,
   ]);
 
   useEffect(() => {
     if (!user || !permissionsLoaded) return;
     // Preserve explicit route refreshes (e.g. /admin/users-roles); only enforce view bucket on dashboard route.
     if (location.pathname !== "/dashboard") return;
-    const splitSidebar =
-      shellRoleKind !== "org_admin" &&
-      ((isCustomerExperience && customerDashboardToggleEligible) ||
-        (teamDashboardToggleEligible && !isCustomerExperience && !isSystemAdminInterface));
+    const splitSidebar = splitSidebarEligible;
     if (!splitSidebar) return;
 
     const mySet = collectSidebarKeys(sidebarItemsForMyViewBucket);
@@ -1009,8 +1062,7 @@ export default function App() {
     user,
     permissionsLoaded,
     roleSidebarItems,
-    teamDashboardToggleEligible,
-    customerDashboardToggleEligible,
+    splitSidebarEligible,
     isCustomerExperience,
     isSystemAdminInterface,
     shellRoleKind,
@@ -1238,7 +1290,7 @@ export default function App() {
         onLogout={handleLogout}
         sidebarOrgName={profile?.organization_name || ""}
         sidebarOrgLogoUrl={profile?.organization_logo ?? undefined}
-        sidebarItems={sidebarItemsForShell}
+        sidebarItems={noAccessAssigned ? [] : sidebarItemsForShell}
         activeNavKey={activeNav}
         onNavSelect={setActiveNav}
         showCreateTicketButton={showCreateTicketButtonInSidebar}
@@ -1272,6 +1324,15 @@ export default function App() {
           ) : !activeOrgId ? (
             <div className="max-w-2xl text-sm text-muted-foreground">
               No tenant selected.
+            </div>
+          ) : noAccessAssigned ? (
+            <div className="flex min-h-[70vh] w-full items-center justify-center px-4">
+              <div className="w-full max-w-xl rounded-xl border border-black/10 bg-background/90 p-6 text-center shadow-sm dark:border-white/10">
+                <h2 className="text-xl font-semibold">You don&apos;t have access</h2>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Your account is currently not assigned to a role. Please contact your administrator.
+                </p>
+              </div>
             </div>
           ) : (
             <>
@@ -1339,18 +1400,13 @@ export default function App() {
                     }
                   />
                 ) : null}
-                {activeNav === "products" && canOpenOrgProducts ? (
-                  <ProductsPage orgId={activeOrgId} />
-                ) : null}
                 {activeNav === "users_roles" && canOpenOrgUsersRoles ? (
                   <UsersRolesPage orgId={activeOrgId} />
                 ) : null}
                 {activeNav === "org_tickets" && canOpenTicketList ? (
                   <MyTicketsPage title="Organisation Tickets" focusTicketId={focusedTicketId} />
                 ) : null}
-                {activeNav === "org_sla_policies" && canOpenOrgSlaPolicies ? (
-                  <SlaPoliciesPage orgId={activeOrgId} />
-                ) : null}
+                {activeNav === "sys_agents" && canOpenAgentsScreen ? <AgentsPage orgId={activeOrgId} /> : null}
                 {activeNav === "org_notification_settings" ? (
                   <NavPlaceholder
                     title="Notification settings"

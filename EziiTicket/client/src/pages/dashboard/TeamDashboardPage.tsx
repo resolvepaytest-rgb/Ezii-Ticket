@@ -696,7 +696,7 @@ function OrgAdminDashboard({
       <div className="mx-auto max-w-[1400px] px-4 pt-2">
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Org Admin Dashboard</h1>
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Organisation Dashboard</h1>
             <p className="mt-1 text-sm text-muted-foreground">
               Organisation overview, SLA health, and priority work.
             </p>

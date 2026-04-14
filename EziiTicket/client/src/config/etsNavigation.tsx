@@ -112,7 +112,7 @@ export function getAgentAdminViewSidebarItems(): SidebarItem[] {
 
 export function getEtsSystemAdminSidebarItems(): SidebarItem[] {
   return [
-    { key: "sys_dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { key: "sys_dashboard", label: "System Dashboard", icon: LayoutDashboard },
     { key: "partner_setup", label: "Organizations", icon: Building2 },
     { key: "sys_tickets", label: "Tickets", icon: ClipboardList },
     { key: "sys_agents", label: "Agents", icon: Headphones },
@@ -132,30 +132,38 @@ export function getEtsSidebarItemsForRole(role: EtsAppRoleKind): SidebarItem[] {
   }
   if (role === "org_admin") {
     return [
-      { key: "org_dashboard", label: "Organisation Dashboard", icon: LayoutDashboard },
-      { key: "products", label: "Products & Queues", icon: LayoutGrid },
-      { key: "users_roles", label: "Users & Teams", icon: Users },
-      { key: "org_tickets", label: "Tickets", icon: Ticket },
-      { key: "org_sla_policies", label: "SLAs & Policies", icon: Settings },
+      { key: "org_dashboard", label: "Org Dashboard", icon: LayoutDashboard },
+      { key: "org_tickets", label: "Tickets", icon: ClipboardList },
+      { key: "sys_agents", label: "Agents", icon: Headphones },
+      {
+        key: "configuration",
+        label: "Configuration",
+        icon: Settings,
+        children: [
+          { key: "api_webhooks", label: "API & Webhooks", icon: RadioTower },
+          { key: "audit_log", label: "Audit Log", icon: ScrollText },
+          { key: "canned_responses", label: "Canned Responses", icon: FileText },
+          { key: "custom_fields", label: "Custom Fields", icon: LayoutGrid },
+          { key: "keyword_routing", label: "Keywords Routing", icon: Hash },
+          { key: "notification_templates", label: "Notification Templates", icon: Send },
+          { key: "priority_master", label: "Priority Master", icon: Flag },
+          { key: "roles_management", label: "Roles & Permissions", icon: KeyRound },
+          { key: "routing_rules", label: "Routing Rules", icon: LayoutGrid },
+          { key: "sla_policies", label: "SLA Policies", icon: Settings },
+          { key: "teams_queues", label: "Teams & Queues", icon: Ticket },
+          { key: "users_roles", label: "Users", icon: Users },
+        ],
+      },
       { key: "workspace_module_c", label: "Reports", icon: BarChart3 },
-      // {
-      //   key: "org_settings",
-      //   label: "Settings",
-      //   icon: Settings2,
-      //   children: [
-      //     { key: "org_notification_settings", label: "Notification", icon: Send },
-      //     { key: "org_profile", label: "Org Profile", icon: Building2 },
-      //   ],
-      // },
     ];
   }
   // Roles → Screen Wise Access group "Team/Agent": `agent_*` keys + `agent_reports` (this Reports row).
   if (role === "agent" || role === "team_lead") {
     return [
-      { key: "agent_dashboard", label: "Team Dashboard", icon: LayoutDashboard },
+      { key: "agent_dashboard", label: "Team/Agent Dashboard", icon: LayoutDashboard },
       { key: "agent_my_tickets", label: "My Tickets", icon: ClipboardList },
       { key: "agent_team_queue", label: "Team Queue", icon: Inbox },
-      { key: "agent_history", label: "Resolved / History", icon: History },
+      { key: "agent_history", label: "History", icon: History },
       { key: "workspace_module_c", label: "Reports", icon: BarChart3 },
     ];
   }

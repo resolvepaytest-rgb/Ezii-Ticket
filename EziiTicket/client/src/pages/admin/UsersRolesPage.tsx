@@ -301,7 +301,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     if (!activeOrgId) return "Organization";
     const fromExternal = externalOrgs.find((o) => Number(o.id) === activeOrgId)?.organization_name;
     if (fromExternal) return fromExternal;
-    if (activeOrgId === 1) return "Ezii HQ";
+    if (activeOrgId === 1) return "Resolve Biz Services Pvt Ltd";
     return `Organization ${activeOrgId}`;
   }, [activeOrgId, externalOrgs]);
 
@@ -1146,6 +1146,27 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
             Manage organization-level permissions and user assignments across the ecosystem.
           </p>
         </div>
+        {isSystemAdminUser ? (
+          <div className="w-full max-w-xl">
+            <select
+              value={String(activeOrgId ?? "")}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                setActiveOrgId(Number.isFinite(n) ? n : orgIdNumFromShell);
+              }}
+              className="w-full rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 text-sm font-semibold text-slate-800 dark:border-white/10 dark:bg-white/10 dark:text-slate-100"
+            >
+              {orgIdNumFromShell ? (
+                <option value={String(orgIdNumFromShell)}>{orgName}</option>
+              ) : null}
+              {externalOrgs.map((o) => (
+                <option key={o.id} value={o.id}>
+                  {o.organization_name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : null}
         <div className="flex items-center gap-2">
           {isSystemAdminUser ? (
             <button
@@ -1182,32 +1203,6 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
           Active Target Organization
         </div>
         <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="w-full max-w-xl">
-            {isSystemAdminUser ? (
-              <select
-                value={String(activeOrgId ?? "")}
-                onChange={(e) => {
-                  const n = Number(e.target.value);
-                  setActiveOrgId(Number.isFinite(n) ? n : orgIdNumFromShell);
-                }}
-                className="w-full rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 text-sm font-semibold text-slate-800 dark:border-white/10 dark:bg-white/10 dark:text-slate-100"
-              >
-                {orgIdNumFromShell ? (
-                  <option value={String(orgIdNumFromShell)}>{orgName}</option>
-                ) : null}
-                {externalOrgs.map((o) => (
-                  <option key={o.id} value={o.id}>
-                    {o.organization_name}
-                  </option>
-                ))}
-              </select>
-            ) : (
-              <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 text-sm font-semibold text-slate-800 dark:border-white/10 dark:bg-white/10 dark:text-slate-100">
-                {orgName}
-              </div>
-            )}
-          </div>
-
           <div className="grid grid-cols-2 gap-2 text-center">
             {splitTenantUserSections ? (
               <>
@@ -1472,7 +1467,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                 </p>
                 {customerOrgInviteMode ? (
                   <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-                    Showing Ezii HQ (organization 1) users only. The <strong>Level</strong> column is each person&apos;s
+                    Showing Resolve Biz Services Pvt Ltd (organization 1) users only. The <strong>Level</strong> column is each person&apos;s
                     current tier in org 1; choose a level below to set their tier for <strong>this tenant</strong>.
                     Assigned role in this organization is always <strong>Customer</strong>.
                   </p>

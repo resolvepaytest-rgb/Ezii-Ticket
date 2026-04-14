@@ -27,8 +27,6 @@ async function buildPoolConfig(): Promise<ConstructorParameters<typeof Pool>[0]>
       config.ssl = { servername: originalHost };
     } else if (typeof config.ssl === "object" && config.ssl !== null) {
       config.ssl = { ...config.ssl, servername: originalHost };
-    } else {
-      config.ssl = { servername: originalHost };
     }
   }
 

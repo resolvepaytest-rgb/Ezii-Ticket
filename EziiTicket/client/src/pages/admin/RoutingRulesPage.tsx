@@ -845,11 +845,12 @@ function sanitizeRoutingConditions(conditions: Record<string, unknown>): Record<
 export function RoutingRulesPage({ orgId }: { orgId: string }) {
   const authUser = useAuthStore((s) => s.user);
   const isSystemAdminUser =
-    authUser?.role_name === "admin" &&
-    authUser?.org_id === "1" &&
-    authUser?.user_id === "1" &&
-    authUser?.role_id === "1" &&
-    authUser?.user_type_id === "1";
+    String(authUser?.role_name ?? "").toLowerCase().trim() === "admin" &&
+    String(authUser?.org_id ?? "") === "1" &&
+    String(authUser?.user_id ?? "") === "1" &&
+    String(authUser?.role_id ?? "") === "1" &&
+    String(authUser?.user_type_id ?? "") === "1";
+  const isOrgScopedAdmin = !isSystemAdminUser;
 
   const shellOrgId = useMemo(() => {
     const n = Number(orgId);
@@ -987,6 +988,11 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
   useEffect(() => {
     setSelectedOrgId(defaultSelectedOrgId);
   }, [defaultSelectedOrgId]);
+
+  useEffect(() => {
+    if (!isOrgScopedAdmin) return;
+    setFilter((prev) => ({ ...prev, orgId: selectedOrgId || defaultSelectedOrgId }));
+  }, [isOrgScopedAdmin, selectedOrgId, defaultSelectedOrgId]);
 
   const fetchRulesForSelectedOrg = useCallback(async (orgIdOverride?: string) => {
     const orgIdToUse = orgIdOverride ?? selectedOrgId;
@@ -1689,10 +1695,9 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
     <div className="mx-auto max-w-[1400px] space-y-5 pb-10">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">System Configuration</p>
           <h1 className="mt-1 text-xl font-bold tracking-tight text-[#475569] dark:text-foreground">Routing Rules</h1>
         </div>
-        {isSystemAdminUser ? (
+        {!isOrgScopedAdmin ? (
           <div className="min-w-[260px]">
             <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</div>
             <select
@@ -1848,13 +1853,20 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
             <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-2">
               <label className="grid gap-1">
                 <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
-                <select value={filter.orgId} onChange={(e) => setFilter((f) => ({ ...f, orgId: e.target.value }))} className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100">
-                  <option value="all">All</option>
-                  {orgs.map((o) => (
+                <select
+                  value={filter.orgId}
+                  onChange={(e) => setFilter((f) => ({ ...f, orgId: e.target.value }))}
+                  disabled={isOrgScopedAdmin}
+                  className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100 disabled:opacity-70"
+                >
+                  {isOrgScopedAdmin ? null : <option value="all">All</option>}
+                  {orgs
+                    .filter((o) => !isOrgScopedAdmin || String(o.id) === String(selectedOrgId))
+                    .map((o) => (
                     <option key={o.id} value={String(o.id)}>
                       {o.name}
                     </option>
-                  ))}
+                    ))}
                 </select>
               </label>
               <label className="grid gap-1">
@@ -1885,7 +1897,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                 type="button"
                 onClick={() =>
                   setFilter({
-                    orgId: "all",
+                    orgId: isOrgScopedAdmin ? String(selectedOrgId || defaultSelectedOrgId) : "all",
                     category: "all",
                     subCategory: "all",
                   })
@@ -1924,31 +1936,35 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
               </button>
             </div>
             <div className="grid grid-cols-1 gap-3 p-5">
-              <label className="grid gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Select Organization</span>
-                <select
-                  value={draft.orgId}
-                  onChange={(e) => {
-                    setDraft((d) => ({
-                      ...d,
-                      orgId: e.target.value,
-                      productIds: [],
-                      categoryIds: [],
-                      subCategoryIds: [],
-                      startLevel: "L1",
-                    }));
-                  }}
-                  disabled={editOpen || draft.isGlobal}
-                  className="rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-xs text-slate-800 disabled:opacity-70 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
-                >
-                  <option value="">Select organization</option>
-                  {modalOrgOptions.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {!isOrgScopedAdmin ? (
+                <label className="grid gap-1">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">
+                    Select Organization
+                  </span>
+                  <select
+                    value={draft.orgId}
+                    onChange={(e) => {
+                      setDraft((d) => ({
+                        ...d,
+                        orgId: e.target.value,
+                        productIds: [],
+                        categoryIds: [],
+                        subCategoryIds: [],
+                        startLevel: "L1",
+                      }));
+                    }}
+                    disabled={editOpen || draft.isGlobal}
+                    className="rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-xs text-slate-800 disabled:opacity-70 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
+                  >
+                    <option value="">Select organization</option>
+                    {modalOrgOptions.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ) : null}
               {isSystemAdminUser ? (
                 <label className="inline-flex items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
                   <input

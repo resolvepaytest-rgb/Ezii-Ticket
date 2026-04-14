@@ -70,7 +70,7 @@ export function KeywordsRoutingPage({ orgId }: { orgId: string }) {
         const hasGlobalOrg = orgList.some((o) => Number(o.id) === 1);
         const orgsWithGlobal = hasGlobalOrg
           ? orgList
-          : ([{ id: 1, name: "Ezii HQ (Global Defaults)" } as Organisation, ...orgList]);
+          : ([{ id: 1, name: "Resolve Biz Services Pvt Ltd (Global Defaults)" } as Organisation, ...orgList]);
         setOrgs(orgsWithGlobal);
       } else {
         setOrgs([{ id: shellOrgId, name: `Organization ${shellOrgId}` } as Organisation]);
@@ -115,7 +115,7 @@ export function KeywordsRoutingPage({ orgId }: { orgId: string }) {
       if (!o.id) continue;
       byId.set(String(o.id), o.organization_name || `Organization ${o.id}`);
     }
-    if (!byId.has("1")) byId.set("1", "Ezii HQ");
+    if (!byId.has("1")) byId.set("1", "Resolve Biz Services Pvt Ltd");
     for (const o of orgs) {
       const id = String(o.id);
       if (!byId.has(id)) byId.set(id, o.name);
@@ -200,7 +200,7 @@ export function KeywordsRoutingPage({ orgId }: { orgId: string }) {
             to <strong className="font-semibold text-slate-800 dark:text-slate-100">P1</strong> and routing targets the{" "}
             <strong className="font-semibold text-slate-800 dark:text-slate-100">L3</strong> queue for that product when one
             exists (queue name or team name contains L3). Default phrases are created for every organization; you can add,
-            edit, or remove them per org.
+            edit, or remove.
           </p>
         </div>
         {isSystemAdminUser ? (

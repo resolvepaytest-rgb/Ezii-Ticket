@@ -19,6 +19,13 @@ function getBearerToken(req: Request) {
   return token;
 }
 
+function normalizeRoleNameKey(name: string | null | undefined): string {
+  return String(name ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+}
+
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const token = getBearerToken(req);
   if (!token) {
@@ -34,11 +41,11 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
 
 export function requireRole(...roles: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {
-    const roleName = req.user?.role_name?.toLowerCase();
+    const roleName = normalizeRoleNameKey(req.user?.role_name);
     if (!roleName) {
       return res.status(401).json({ ok: false, error: "Unauthenticated" });
     }
-    const allowed = roles.map((r) => r.toLowerCase());
+    const allowed = roles.map((r) => normalizeRoleNameKey(r));
     if (!allowed.includes(roleName)) {
       return res.status(403).json({ ok: false, error: "Forbidden" });
     }

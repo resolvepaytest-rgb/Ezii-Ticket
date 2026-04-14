@@ -20,7 +20,8 @@ import {
 import { useAuthStore } from "@store/useAuthStore";
 import { EZII_BRAND } from "@/lib/eziiBrand";
 import { cn } from "@/lib/utils";
-import { X } from "lucide-react";
+import { Pencil, Plus, ShieldCheck, Trash2, X } from "lucide-react";
+import { createPortal } from "react-dom";
 
 type RolePermissions = {
   ticket_access?: string;
@@ -71,7 +72,8 @@ const TEAM_AGENT_ROLE_ACCESS_SCREENS = [
 
 const ROLE_ACCESS_SCREENS = [
   { key: "dashboard", label: "Organisation dashboard (agent / org; not system overview)" },
-  { key: "tickets", label: "Team / org ticket list" },
+  { key: "agent", label: "Agent" },
+  { key: "tickets", label: "Org ticket list" },
   { key: "users", label: "Users" },
   { key: "roles_permissions", label: "Roles & Permissions" },
   { key: "teams_queues", label: "Teams & Queues" },
@@ -313,29 +315,6 @@ function mergePermissionsWithBaseline(roleName: string, current: RolePermissions
   };
 }
 
-function ticketAccessLabel(v: string | undefined) {
-  if (v === "own_tickets") return "Own tickets only";
-  if (v === "org_tickets") return "Own organization";
-  if (v === "assigned_queue") return "Assigned queue";
-  if (v === "product_queue_escalated") return "Product queue + escalated";
-  if (v === "all_tickets") return "All tickets";
-  return "Own tickets only";
-}
-
-function assignScopeLabel(v: string | undefined) {
-  if (v === "none") return "No";
-  if (v === "self") return "Self";
-  if (v === "l2_queue") return "L2 queue";
-  if (v === "any") return "Any";
-  return "No";
-}
-
-function slaLabel(v: RolePermissions["tier1_sla_config"] | RolePermissions["tier2_sla_config"]) {
-  if (v === "view") return "View only";
-  if (v === "edit") return "Edit";
-  return "No access";
-}
-
 function roleOrgId(role: Role): number | null {
   const raw =
     (role as Role & { organisation_id?: unknown }).organisation_id ??
@@ -350,23 +329,23 @@ function roleOrgId(role: Role): number | null {
   return null;
 }
 
-function permissionsSummary(p: RolePermissions) {
+function permissionCounts(p: RolePermissions) {
   const screenAccess = normalizeScreenAccess(p.screen_access, false);
-  const viewCount = Object.values(screenAccess).filter((entry) => entry.view).length;
+  const menuCount = Object.values(screenAccess).filter((entry) => entry.view || entry.modify).length;
   const modifyCount = Object.values(screenAccess).filter((entry) => entry.modify).length;
-  return `${ticketAccessLabel(p.ticket_access)} • Assign: ${assignScopeLabel(
-    p.assign_scope
-  )} • Resolve: ${p.can_resolve ? "Yes" : "No"} • T1: ${slaLabel(
-    p.tier1_sla_config
-  )} • T2: ${slaLabel(p.tier2_sla_config)} • Screens V:${viewCount} M:${modifyCount}`;
+  return { menuCount, modifyCount };
 }
 
-function screenAccessDataRow(p: RolePermissions) {
-  const screenAccess = normalizeScreenAccess(p.screen_access, false);
-  const n = ROLE_ACCESS_SCREENS.length;
-  const viewCount = Object.values(screenAccess).filter((entry) => entry.view).length;
-  const modifyCount = Object.values(screenAccess).filter((entry) => entry.modify).length;
-  return `View ${viewCount}/${n} · Modify ${modifyCount}/${n}`;
+function formatRoleCreatedDate(role: Role) {
+  const createdRaw = (role as Role & { created_at?: unknown }).created_at;
+  if (typeof createdRaw !== "string" || !createdRaw.trim()) return "-";
+  const dt = new Date(createdRaw);
+  if (Number.isNaN(dt.getTime())) return "-";
+  return dt.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
 }
 
 function applyFieldsFromRole(role: Role | null): Pick<
@@ -383,13 +362,21 @@ function applyFieldsFromRole(role: Role | null): Pick<
 
 export function RolesPage() {
   const authUser = useAuthStore((s) => s.user);
+  const authOrgIdNum = Number(authUser?.org_id);
+  const isSystemAdminUser =
+    authUser?.role_name === "admin" &&
+    authUser?.org_id === "1" &&
+    authUser?.user_id === "1" &&
+    authUser?.role_id === "1" &&
+    authUser?.user_type_id === "1";
+  const isOrgScopedAdmin = !isSystemAdminUser && Number.isFinite(authOrgIdNum) && authOrgIdNum > 0;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [roles, setRoles] = useState<Role[]>([]);
 
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null);
   const [creating, setCreating] = useState(false);
-  const [selectedOrgFilter, setSelectedOrgFilter] = useState("all");
+  const [selectedOrgFilter, setSelectedOrgFilter] = useState("");
   const [externalOrgs, setExternalOrgs] = useState<ExternalOrganization[]>([]);
   const [externalOrgsLoading, setExternalOrgsLoading] = useState(false);
   const [draft, setDraft] = useState<DraftState | null>(null);
@@ -410,7 +397,7 @@ export function RolesPage() {
   const defaultRoles = useMemo(() => roles.filter((r) => r.is_default), [roles]);
   const customRoles = useMemo(() => roles.filter((r) => !r.is_default), [roles]);
   const filteredCustomRoles = useMemo(() => {
-    if (selectedOrgFilter === "all") return customRoles;
+    if (!selectedOrgFilter) return customRoles;
     const selectedOrgId = Number(selectedOrgFilter);
     if (!Number.isFinite(selectedOrgId)) return customRoles;
     return customRoles.filter((r) => roleOrgId(r) === selectedOrgId);
@@ -421,7 +408,9 @@ export function RolesPage() {
     setError(null);
     try {
       const orgId =
-        organisationFilter !== "all" && Number.isFinite(Number(organisationFilter))
+        isOrgScopedAdmin
+          ? Math.trunc(authOrgIdNum)
+          : organisationFilter && Number.isFinite(Number(organisationFilter))
           ? Number(organisationFilter)
           : undefined;
       const all = await listRoles(orgId);
@@ -440,6 +429,18 @@ export function RolesPage() {
     void refresh(selectedOrgFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedOrgFilter]);
+
+  useEffect(() => {
+    if (isSystemAdminUser && !selectedOrgFilter) {
+      setSelectedOrgFilter("1");
+      return;
+    }
+    if (!isOrgScopedAdmin) return;
+    const ownOrg = String(Math.trunc(authOrgIdNum));
+    if (selectedOrgFilter !== ownOrg) {
+      setSelectedOrgFilter(ownOrg);
+    }
+  }, [isSystemAdminUser, isOrgScopedAdmin, authOrgIdNum, selectedOrgFilter]);
 
   useEffect(() => {
     if (!roleModalOpen) return;
@@ -484,7 +485,7 @@ export function RolesPage() {
     return () => {
       cancelled = true;
     };
-  }, [roleModalOpen, draft?.apply_role_to, draft?.apply_attribute_id]);
+  }, [roleModalOpen, draft, draft?.apply_role_to, draft?.apply_attribute_id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -632,7 +633,9 @@ export function RolesPage() {
     try {
       if (creating) {
         const selectedOrgId =
-          selectedOrgFilter !== "all" && Number.isFinite(Number(selectedOrgFilter))
+          isOrgScopedAdmin
+            ? Math.trunc(authOrgIdNum)
+            : selectedOrgFilter !== "all" && Number.isFinite(Number(selectedOrgFilter))
             ? Number(selectedOrgFilter)
             : null;
         if (!selectedOrgId) {
@@ -694,7 +697,6 @@ export function RolesPage() {
   const effectiveDraft = draft;
   const p = normalizePermissions(effectiveDraft?.permissions ?? defaultPermissions());
 
-  const roleIntegrityPct = 99.2;
   const isRootSystemAdminUser = Number(authUser?.user_id) === 1;
   const yourRoleKey = isRootSystemAdminUser
     ? baselineRoleKey("system_admin")
@@ -702,210 +704,177 @@ export function RolesPage() {
       ? baselineRoleKey(yourRoleName)
       : null;
 
+  const allRows = useMemo(
+    () => [...filteredCustomRoles, ...defaultRoles],
+    [filteredCustomRoles, defaultRoles]
+  );
+  const orgFilterOptions = useMemo(() => {
+    const scoped = externalOrgs.filter(
+      (org) => !isOrgScopedAdmin || Number(org.id) === Math.trunc(authOrgIdNum)
+    );
+    if (!isSystemAdminUser) return scoped;
+    const hasOrgOne = scoped.some((org) => Number(org.id) === 1);
+    if (hasOrgOne) return scoped;
+    return [{ id: "1", organization_name: "Resolve Biz Services Pvt Ltd" }, ...scoped];
+  }, [externalOrgs, isOrgScopedAdmin, authOrgIdNum, isSystemAdminUser]);
+
   return (
     <div className="mx-auto max-w-[1400px] space-y-4 pb-8">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold leading-tight text-[#0f172a] dark:text-foreground">
-            Roles & Permissions
-          </h1>
-          <p className="mt-1 max-w-3xl text-xs text-slate-600 dark:text-muted-foreground">
-            Configure access control models for the entire ecosystem. Manage global templates and organization-specific
-            overrides.
-          </p>
-        </div>
-        <div className="rounded-xl border border-black/10 bg-white/75 px-4 py-3 text-right shadow-sm dark:border-white/10 dark:bg-white/10">
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-300">
-            System Integrity
+        <div className="flex items-center gap-2 text-xl font-semibold text-[#111827] dark:text-slate-100">
+            <ShieldCheck className="h-5 w-5 text-[#1E88E5]" aria-hidden />
+            Role & Permissions Management
           </div>
-          <div className="text-xl font-bold text-[#16A34A]">{roleIntegrityPct}%</div>
+          <p className="mt-1 text-sm text-slate-600 dark:text-muted-foreground">Manage user roles and permissions</p>
         </div>
+        <div className="flex items-center justify-between">
+          {!isOrgScopedAdmin ? (
+            <div className="w-full max-w-[280px]">
+              <p className="text-sm text-slate-600 dark:text-muted-foreground">Select Organization</p>
+              <select
+                value={selectedOrgFilter}
+                onChange={(e) => setSelectedOrgFilter(e.target.value)}
+                className="w-full rounded-lg border border-black/10 bg-white px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
+                disabled={externalOrgsLoading}
+              >
+                {orgFilterOptions.map((org) => (
+                  <option key={org.id} value={org.id}>
+                    {Number(org.id) === 1 && isSystemAdminUser
+                      ? "Resolve Biz Services Pvt Ltd"
+                      : org.organization_name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={startCreate}
+          className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm"
+          style={{ backgroundColor: EZII_BRAND.primary }}
+        >
+          <Plus className="h-4 w-4" />
+          Create Role
+        </button>
       </div>
 
-      {loading ? (
-        <GlassCard className="p-6">
-          <Loader label="Loading roles..." size="sm" className="min-h-[30vh]" />
-        </GlassCard>
-      ) : error ? (
-        <GlassCard className="p-6">
-          <div className="text-sm text-red-600">{error}</div>
-        </GlassCard>
-      ) : (
-        <div className="grid grid-cols-1 gap-5">
-          <div className="space-y-4">
-            <GlassCard className="border-black/10 bg-white/35 p-4 dark:border-white/10 dark:bg-white/[0.06]">
-              <div className="mb-2 text-base font-bold text-[#374151] dark:text-slate-200">GLOBAL DEFAULT ROLES</div>
-              <div className="space-y-3">
-                {defaultRoles.map((r) => {
-                  const rp = permissionsSafe(r.permissions_json);
-                  const active = !creating && selectedRoleId === r.id;
-                  const isYourRole = yourRoleKey != null && baselineRoleKey(r.name) === yourRoleKey;
-                  return (
-                    <div
-                      key={r.id}
-                      className={cn(
-                        "rounded-xl border p-3 transition-colors",
-                        active
-                          ? "border-[#1E88E5]/55 bg-[#1E88E5]/8"
-                          : "border-black/10 bg-white/55 dark:border-white/10 dark:bg-white/5"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-2 text-base leading-tight text-[#111827] dark:text-slate-100">
-                            {r.name}
-                            {isYourRole ? (
-                              <span className="rounded-full bg-[#16A34A]/15 px-2 py-0.5 text-[10px] font-bold text-[#16A34A]">
-                                Your Role
-                              </span>
-                            ) : null}
-                            <span className="rounded-full bg-[#1E88E5]/15 px-2 py-0.5 text-[10px] font-bold text-[#1E88E5]">
-                              Default
-                            </span>
-                          </div>
-                          <div className="mt-1 text-xs italic text-slate-600 dark:text-slate-300">
-                            {permissionsSummary(rp)}
-                          </div>
-                          <div className="mt-1.5 text-[11px] text-slate-700 dark:text-slate-200">
-                            <span className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                              Screen access
-                            </span>
-                            <span className="mx-1.5 text-slate-400">·</span>
-                            {screenAccessDataRow(rp)}
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => startEdit(r)}
-                          className="rounded-md bg-black/5 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-black/10 dark:bg-white/10 dark:text-slate-200"
-                        >
-                          Edit
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </GlassCard>
-
-            <GlassCard className="border-black/10 bg-white/35 p-4 dark:border-white/10 dark:bg-white/[0.06]">
-              <div className="mb-3 text-base font-bold text-[#374151] dark:text-slate-200">ORGANIZATION CUSTOM ROLES</div>
-              <div className="mb-3 flex items-center gap-2">
-                <select
-                  value={selectedOrgFilter}
-                  onChange={(e) => setSelectedOrgFilter(e.target.value)}
-                  className="flex-1 rounded-lg border border-black/10 bg-white/70 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
-                  disabled={externalOrgsLoading}
-                >
-                  <option value="all">Ezii HQ</option>
-                  {externalOrgs.map((org) => (
-                    <option key={org.id} value={org.id}>
-                      {org.organization_name}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={startCreate}
-                  className="rounded-lg px-3 py-2 text-xs font-semibold text-white"
-                  style={{ backgroundColor: EZII_BRAND.primary }}
-                >
-                  + Create Custom
-                </button>
-              </div>
-              <div className="space-y-2">
-                {filteredCustomRoles.map((r) => {
-                  const active = !creating && selectedRoleId === r.id;
-                  const isYourRole = yourRoleKey != null && baselineRoleKey(r.name) === yourRoleKey;
-                  const orgId = roleOrgId(r);
-                  const orgName =
-                    orgId == null
-                      ? null
-                      : externalOrgs.find((o) => Number(o.id) === orgId)?.organization_name ??
-                        `Org ${orgId}`;
-                  return (
-                    <div
-                      key={r.id}
-                      className={cn(
-                        "rounded-xl border p-3",
-                        active
-                          ? "border-[#1E88E5]/55 bg-[#1E88E5]/8"
-                          : "border-black/10 bg-white/55 dark:border-white/10 dark:bg-white/5"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="truncate text-base font-semibold text-[#111827] dark:text-slate-100">
-                            {r.name}
-                          </div>
-                          {isYourRole ? (
-                            <div className="mt-1">
-                              <span className="rounded-full bg-[#16A34A]/15 px-2 py-0.5 text-[10px] font-bold text-[#16A34A]">
-                                Your Role
-                              </span>
-                            </div>
-                          ) : null}
-                          {orgName ? (
-                            <div className="mt-0.5 text-[11px] font-semibold uppercase tracking-wide text-[#1E88E5]">
-                              {orgName}
-                            </div>
-                          ) : null}
-                          <div className="mt-1 truncate text-xs italic text-slate-600 dark:text-slate-300">
-                            {permissionsSummary(permissionsSafe(r.permissions_json))}
-                          </div>
-                          <div className="mt-1.5 truncate text-[11px] text-slate-700 dark:text-slate-200">
-                            <span className="font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                              Screen access
-                            </span>
-                            <span className="mx-1.5 text-slate-400">·</span>
-                            {screenAccessDataRow(permissionsSafe(r.permissions_json))}
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => startEdit(r)}
-                            className="rounded-md bg-black/5 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-black/10 dark:bg-white/10 dark:text-slate-200"
-                          >
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void handleDelete(r)}
-                            className="rounded-md border border-red-300/80 px-2 py-1 text-xs font-semibold text-red-600"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                {!filteredCustomRoles.length ? (
-                  <div className="rounded-xl border border-dashed border-black/15 bg-white/40 px-3 py-4 text-xs text-slate-600 dark:border-white/15 dark:bg-white/5 dark:text-slate-300">
-                    No custom roles found for the selected organization.
-                  </div>
-                ) : null}
-              </div>
-            </GlassCard>
+      <GlassCard className="overflow-hidden rounded-2xl border border-black/10 bg-white/90 p-0 dark:border-white/10 dark:bg-white/[0.04]">
+      
+        {loading ? (
+          <div className="p-6">
+            <Loader label="Loading roles..." size="sm" className="min-h-[30vh]" />
           </div>
+        ) : error ? (
+          <div className="p-6">
+            <div className="text-sm text-red-600">{error}</div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto px-3 py-2">
+            <table className="min-w-full border-collapse text-sm">
+              <thead>
+                <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-300">
+                  <th className="px-3 py-2">Role Name</th>
+                  <th className="px-3 py-2">Type</th>
+                  <th className="px-3 py-2">Permissions</th>
+                  <th className="px-3 py-2">Created By</th>
+                  <th className="px-3 py-2">Created</th>
+                  <th className="px-3 py-2">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-black/10 dark:divide-white/10">
+                {allRows.map((role) => {
+                  const rp = permissionsSafe(role.permissions_json);
+                  const counts = permissionCounts(rp);
+                  const isYourRole = yourRoleKey != null && baselineRoleKey(role.name) === yourRoleKey;
+                  return (
+                    <tr
+                      key={role.id}
+                      className="bg-transparent text-[#1f2937] transition-colors hover:bg-slate-50/80 dark:text-slate-100 dark:hover:bg-white/[0.04]"
+                    >
+                      <td className="px-3 py-3 font-semibold">
+                        <div className="flex items-center gap-2">
+                          <span>{role.name}</span>
+                          {isYourRole ? (
+                            <span className="rounded-full bg-[#16A34A]/15 px-2 py-0.5 text-[10px] font-bold text-[#16A34A]">
+                              You
+                            </span>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span
+                          className={cn(
+                            "rounded-full px-2 py-1 text-[11px] font-semibold",
+                            role.is_default
+                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                              : "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                          )}
+                        >
+                          {role.is_default ? "Default" : "Custom"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-700 dark:bg-white/10 dark:text-slate-200">
+                            {counts.menuCount} menus
+                          </span>
+                          <span className="rounded-full bg-[#1E88E5]/15 px-2 py-1 text-[11px] font-semibold text-[#1E88E5]">
+                            {counts.modifyCount} modify
+                          </span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 text-slate-600 dark:text-slate-300">System</td>
+                      <td className="px-3 py-3 text-slate-600 dark:text-slate-300">{formatRoleCreatedDate(role)}</td>
+                      <td className="px-3 py-3">
+                        <div className="flex items-center gap-3">
+                          <button
+                            type="button"
+                            onClick={() => startEdit(role)}
+                            className="text-slate-600 hover:text-[#1E88E5] dark:text-slate-300 dark:hover:text-[#60A5FA]"
+                            aria-label={`Edit ${role.name}`}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </button>
+                          {!role.is_default ? (
+                            <button
+                              type="button"
+                              onClick={() => void handleDelete(role)}
+                              className="text-red-500 hover:text-red-600"
+                              aria-label={`Delete ${role.name}`}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
 
-        </div>
-      )}
+                  );
+                })}
+                {!allRows.length ? (
+                  <tr>
+                    <td colSpan={6} className="px-3 py-10 text-center text-sm text-slate-500 dark:text-slate-300">
+                      No roles found for the selected organization.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </GlassCard>
 
-      {roleModalOpen ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm">
+      {roleModalOpen && typeof document !== "undefined"
+        ? createPortal(
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm">
           <div className="flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/10 dark:bg-zinc-950/90">
             <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 dark:border-white/10">
               <div>
                 <h2 className="text-xl font-bold leading-tight text-[#111827] dark:text-slate-100">
                   {creating ? "Create Custom Role" : `Edit Role: ${effectiveRole?.name ?? "Select role"}`}
                 </h2>
-                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                  {creating
-                    ? "Create an organization-level custom template."
-                    : "Global system template for technical escalation teams."}
-                </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1296,8 +1265,10 @@ export function RolesPage() {
               <div className="p-6 text-xs text-muted-foreground">Select a role from the left panel to edit.</div>
             )}
           </div>
-        </div>
-      ) : null}
+        </div>,
+        document.body
+      )
+        : null}
     </div>
   );
 }

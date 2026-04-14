@@ -209,6 +209,7 @@ export type Role = {
   name: string;
   description?: string | null;
   is_default?: boolean;
+  created_at?: string;
   permissions_json?: Record<string, unknown>;
   apply_role_to?: ApplyRoleTo;
   apply_attribute_id?: string | null;

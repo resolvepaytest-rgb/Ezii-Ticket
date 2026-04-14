@@ -1,5 +1,6 @@
 export const SCREEN_KEYS = [
   "dashboard",
+  "agent",
   "tickets",
   "users",
   "roles_permissions",

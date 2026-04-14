@@ -430,7 +430,6 @@ export function PriorityMasterPage({
     <div className="mx-auto max-w-[1400px] space-y-4 pb-10">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">System Configuration</p>
           <h1 className="mt-1 text-xl font-bold tracking-tight text-[#475569] dark:text-foreground">Priority Master</h1>
           <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
             Set ticket priority by sub-category, with category and product-level quick actions.
@@ -452,14 +451,7 @@ export function PriorityMasterPage({
                 ))}
               </select>
             </label>
-          ) : (
-            <div className="min-w-[220px] flex-1">
-              <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</div>
-              <div className="rounded-xl border border-black/10 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-800 dark:border-white/15 dark:text-slate-100">
-                {orgOptions[0]?.name ?? `Organization ${orgId}`}
-              </div>
-            </div>
-          )}
+          ) : null}
           <button
             type="button"
             onClick={() => {

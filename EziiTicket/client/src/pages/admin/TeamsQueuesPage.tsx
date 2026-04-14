@@ -1249,31 +1249,29 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 <button type="button" onClick={() => setCreateTeamOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
               <div className="grid gap-3 p-5">
-                <label className="grid gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Select Organization *</span>
-                  <select
-                    value={createTeamForm.organisation_id}
-                    onChange={(e) =>
-                      setCreateTeamForm((f) => ({ ...f, organisation_id: e.target.value }))
-                    }
-                    disabled={!isSystemAdminUser || createTeamForm.create_for_all_organisations}
-                    className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10 disabled:opacity-60"
-                  >
-                    {isSystemAdminUser ? (
-                      <>
-                        <option value="">Select organization</option>
-                        <option value="1">{ORG1_NAME}</option>
-                        {externalOrgs.map((o) => (
-                          <option key={o.id} value={o.id}>
-                            {o.organization_name}
-                          </option>
-                        ))}
-                      </>
-                    ) : (
-                      <option value={orgId}>{Number(orgId) === 1 ? ORG1_NAME : `Organization ${orgIdNum ?? "-"}`}</option>
-                    )}
-                  </select>
-                </label>
+                {isSystemAdminUser ? (
+                  <label className="grid gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">
+                      Select Organization *
+                    </span>
+                    <select
+                      value={createTeamForm.organisation_id}
+                      onChange={(e) =>
+                        setCreateTeamForm((f) => ({ ...f, organisation_id: e.target.value }))
+                      }
+                      disabled={createTeamForm.create_for_all_organisations}
+                      className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10 disabled:opacity-60"
+                    >
+                      <option value="">Select organization</option>
+                      <option value="1">{ORG1_NAME}</option>
+                      {externalOrgs.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.organization_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Team Name</span>
                   <input value={createTeamForm.name} onChange={(e) => setCreateTeamForm((f) => ({ ...f, name: e.target.value }))} className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10" />

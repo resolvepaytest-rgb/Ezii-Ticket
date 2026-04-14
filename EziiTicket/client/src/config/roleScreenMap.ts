@@ -10,7 +10,7 @@ export const SYSTEM_ADMIN_NAV_TO_SCREEN: Record<string, string | readonly string
   /** Org directory — closest match until a dedicated screen key exists */
   partner_setup: "users",
   sys_tickets: "tickets",
-  sys_agents: "users",
+  sys_agents: "agent",
   workspace_module_c: "dashboard",
   users_roles: "users",
   roles_management: "roles_permissions",
@@ -97,7 +97,7 @@ function filterAdminItemsNotInBase(adminItems: SidebarItem[], baseKeys: Set<stri
 }
 
 /**
- * Appends granted platform screens under "System administration" without duplicating keys already present
+ * Appends granted platform screens under "Configuration" without duplicating keys already present
  * in the role sidebar (e.g. org `users_roles` vs platform Users).
  */
 export function mergeGrantedSystemAdminIntoBase(
@@ -116,7 +116,7 @@ export function mergeGrantedSystemAdminIntoBase(
     ...baseItems,
     {
       key: options?.groupKey ?? "dynamic_system_admin_group",
-      label: options?.groupLabel ?? "System administration",
+      label: options?.groupLabel ?? "Configuration",
       icon: Settings,
       children: filtered,
     },

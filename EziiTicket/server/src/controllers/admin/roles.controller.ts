@@ -7,6 +7,23 @@ import { isEziiSystemAdmin } from "./eziiSystemAdmin.js";
 
 const APPLY_MODES = new Set(["all", "reportees", "attribute", "sub_attribute"]);
 
+async function rolesHasCreatedAtColumn(): Promise<boolean> {
+  const res = await pool.query<{ exists: boolean }>(
+    `select exists (
+      select 1
+      from information_schema.columns
+      where table_schema = 'public'
+        and table_name = 'roles'
+        and column_name = 'created_at'
+    ) as "exists"`
+  );
+  return Boolean(res.rows[0]?.exists);
+}
+
+function rolesCreatedAtSelectExpr(hasCreatedAt: boolean) {
+  return hasCreatedAt ? "created_at" : "null::timestamptz as created_at";
+}
+
 function parseApplyRolePayload(
   body: Record<string, unknown> | undefined | null,
   defaults?: {
@@ -65,9 +82,11 @@ export async function getRoles(req: Request, res: Response) {
   const requestedOrgId = asInt(req.query.organisation_id);
   const orgId = isEziiSystemAdmin(req) && requestedOrgId ? requestedOrgId : authOrgId;
   await ensureTenantAndDefaultsByOrgId(orgId);
+  const hasCreatedAt = await rolesHasCreatedAtColumn();
+  const createdAtExpr = rolesCreatedAtSelectExpr(hasCreatedAt);
   const result = await pool.query(
     `select id, organisation_id, name, description, is_default, permissions_json,
-            apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id
+            apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id, ${createdAtExpr}
      from roles where organisation_id = $1 order by id asc`,
     [orgId]
   );
@@ -91,6 +110,8 @@ export async function createRole(req: Request, res: Response) {
   const orgId = isEziiSystemAdmin(req) && requestedOrgId ? requestedOrgId : authOrgId;
 
   await ensureTenantAndDefaultsByOrgId(orgId);
+  const hasCreatedAt = await rolesHasCreatedAtColumn();
+  const createdAtExpr = rolesCreatedAtSelectExpr(hasCreatedAt);
   const apply = parseApplyRolePayload(req.body as Record<string, unknown>);
   if ("error" in apply) return res.status(400).json({ ok: false, error: apply.error });
   const rolePermissionsStr = JSON.stringify(rolePermissions);
@@ -99,7 +120,7 @@ export async function createRole(req: Request, res: Response) {
                         apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id)
      values ($1,$2,$3,coalesce($4::jsonb,'{}'::jsonb),false,$5,$6,$7,$8)
      returning id, organisation_id, name, description, is_default, permissions_json,
-               apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id`,
+               apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id, ${createdAtExpr}`,
     [
       orgId,
       name.trim(),
@@ -129,9 +150,12 @@ export async function updateRole(req: Request, res: Response) {
   const nextName = name != null ? (typeof name === "string" ? name.trim() : null) : null;
 
   const rolePermissions = permissions_json && typeof permissions_json === "object" ? permissions_json : null;
-  const orgId = asInt(req.user?.org_id);
-  if (!orgId) return res.status(400).json({ ok: false, error: "invalid organisation" });
-  if (Number(row0.organisation_id) !== orgId) return res.status(403).json({ ok: false, error: "forbidden" });
+  const authOrgId = asInt(req.user?.org_id);
+  if (!authOrgId) return res.status(400).json({ ok: false, error: "invalid organisation" });
+  const isSystemAdmin = isEziiSystemAdmin(req);
+  const roleOrgId = Number(row0.organisation_id);
+  if (!isSystemAdmin && roleOrgId !== authOrgId) return res.status(403).json({ ok: false, error: "forbidden" });
+  const orgId = isSystemAdmin ? roleOrgId : authOrgId;
   await ensureTenantAndDefaultsByOrgId(orgId);
   const existingApply = await pool.query<{
     apply_role_to: string;
@@ -159,6 +183,8 @@ export async function updateRole(req: Request, res: Response) {
   if (isEziiOrg && row0.is_default && nextName && nextName !== row0.name) {
     return res.status(403).json({ ok: false, error: "default role names cannot be changed in org 1" });
   }
+  const hasCreatedAt = await rolesHasCreatedAtColumn();
+  const createdAtExpr = rolesCreatedAtSelectExpr(hasCreatedAt);
   const result = await pool.query(
     `update roles
      set name = coalesce($2, name),
@@ -170,7 +196,7 @@ export async function updateRole(req: Request, res: Response) {
          apply_worker_type_id = $9
      where id=$1 and organisation_id = $5
      returning id, organisation_id, name, description, is_default, permissions_json,
-               apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id`,
+               apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id, ${createdAtExpr}`,
     [
       id,
       nextName,
@@ -197,9 +223,12 @@ export async function deleteRole(req: Request, res: Response) {
   const row0 = existing.rows[0];
   if (!row0) return res.status(404).json({ ok: false, error: "not found" });
 
-  const orgId = asInt(req.user?.org_id);
-  if (!orgId) return res.status(400).json({ ok: false, error: "invalid organisation" });
-  if (Number(row0.organisation_id) !== orgId) return res.status(403).json({ ok: false, error: "forbidden" });
+  const authOrgId = asInt(req.user?.org_id);
+  if (!authOrgId) return res.status(400).json({ ok: false, error: "invalid organisation" });
+  const isSystemAdmin = isEziiSystemAdmin(req);
+  const roleOrgId = Number(row0.organisation_id);
+  if (!isSystemAdmin && roleOrgId !== authOrgId) return res.status(403).json({ ok: false, error: "forbidden" });
+  const orgId = isSystemAdmin ? roleOrgId : authOrgId;
   const isEziiOrg = orgId === 1;
   if (isEziiOrg && row0.is_default) {
     return res.status(403).json({ ok: false, error: "default role cannot be deleted in org 1" });
