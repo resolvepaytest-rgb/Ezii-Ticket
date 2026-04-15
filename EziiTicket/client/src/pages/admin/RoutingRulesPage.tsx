@@ -1692,10 +1692,10 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-[1400px] space-y-5 pb-10">
-      <div className="flex items-start justify-between gap-3">
+    <div className="mx-auto max-w-[1400px] space-y-4 pb-8 text-[13px]">
+      <div className="flex items-start justify-between gap-2.5">
         <div>
-          <h1 className="mt-1 text-xl font-bold tracking-tight text-[#475569] dark:text-foreground">Routing Rules</h1>
+          <h1 className="mt-1 text-lg font-bold tracking-tight text-[#475569] dark:text-foreground">Routing Rules</h1>
         </div>
         {!isOrgScopedAdmin ? (
           <div className="min-w-[260px]">
@@ -1703,7 +1703,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
             <select
               value={selectedOrgId}
               onChange={(e) => setSelectedOrgId(e.target.value)}
-              className="w-full rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
+              className="w-full rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-xs font-semibold text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
             >
               {orgDropdownOptions.map((o) => (
                 <option key={o.id} value={o.id}>
@@ -1716,7 +1716,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
         <button
           type="button"
           onClick={openCreate}
-          className="inline-flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-semibold text-white"
+          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-white"
           style={{ backgroundColor: EZII_BRAND.primary }}
         >
           <Plus className="h-4 w-4" />
@@ -1724,36 +1724,36 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <GlassCard className="border-black/10 bg-white/35 p-4 dark:border-white/10 dark:bg-white/[0.06]">
+      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
+        <GlassCard className="border-black/10 bg-white/35 p-3.5 dark:border-white/10 dark:bg-white/[0.06]">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Active Rules</div>
-          <div className="mt-1 text-3xl font-bold text-[#111827] dark:text-slate-100">{stats.active}</div>
+          <div className="mt-1 text-2xl font-bold text-[#111827] dark:text-slate-100">{stats.active}</div>
           <div className="mt-2 text-xs text-emerald-600">~ +3 from last month</div>
         </GlassCard>
-        <GlassCard className="border-black/10 bg-white/35 p-4 dark:border-white/10 dark:bg-white/[0.06]">
+        <GlassCard className="border-black/10 bg-white/35 p-3.5 dark:border-white/10 dark:bg-white/[0.06]">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total Rules</div>
-          <div className="mt-1 text-3xl font-bold text-[#1E88E5]">{stats.total}</div>
+          <div className="mt-1 text-2xl font-bold text-[#1E88E5]">{stats.total}</div>
           <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200">
             <div className="h-full rounded-full bg-[#1E88E5]" style={{ width: "72%" }} />
           </div>
         </GlassCard>
-        <GlassCard className="border-black/10 bg-white/35 p-4 dark:border-white/10 dark:bg-white/[0.06]">
+        <GlassCard className="border-black/10 bg-white/35 p-3.5 dark:border-white/10 dark:bg-white/[0.06]">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Auto-Resolved</div>
-          <div className="mt-1 text-3xl font-bold text-[#111827] dark:text-slate-100">{(stats.total * 58).toLocaleString()}</div>
+          <div className="mt-1 text-2xl font-bold text-[#111827] dark:text-slate-100">{(stats.total * 58).toLocaleString()}</div>
           <div className="mt-2 text-xs text-slate-500">Monthly volume</div>
         </GlassCard>
-        <GlassCard className="border-black/10 bg-white/35 p-4 dark:border-white/10 dark:bg-white/[0.06]">
+        <GlassCard className="border-black/10 bg-white/35 p-3.5 dark:border-white/10 dark:bg-white/[0.06]">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Conflict Alerts</div>
-          <div className="mt-1 text-3xl font-bold text-red-600">{stats.paused.toString().padStart(2, "0")}</div>
+          <div className="mt-1 text-2xl font-bold text-red-600">{stats.paused.toString().padStart(2, "0")}</div>
           <div className="mt-2 text-xs text-red-600">Requires attention</div>
         </GlassCard>
       </div>
 
-      <GlassCard className="border-black/10 bg-white/40 p-5 dark:border-white/10 dark:bg-white/[0.04]">
+      <GlassCard className="border-black/10 bg-white/40 p-4 dark:border-white/10 dark:bg-white/[0.04]">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <div className="text-xl font-semibold text-[#111827] dark:text-slate-100">Routing Rules List</div>
-            <div className="text-sm text-slate-600 dark:text-slate-300">
+            <div className="text-lg font-semibold text-[#111827] dark:text-slate-100">Routing Rules List</div>
+            <div className="text-xs text-slate-600 dark:text-slate-300">
               Configure and manage routing rules.
             </div>
           </div>
@@ -1761,14 +1761,14 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
             <button
               type="button"
               onClick={() => setFilterOpen(true)}
-              className="inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm font-semibold dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
+              className="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-xs font-semibold dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
             >
               <SlidersHorizontal className="h-4 w-4" />
               Filter
             </button>
             <button
               type="button"
-              className="rounded-full border border-black/10 bg-white/70 px-4 py-2 text-sm font-semibold dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
+              className="rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-xs font-semibold dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
             >
               Bulk Action
             </button>
@@ -1776,24 +1776,24 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
         </div>
 
         {loading ? <Loader className="mt-8" label="Loading rules..." size="sm" /> : null}
-        {error ? <div className="mt-4 text-sm text-red-600">{error}</div> : null}
+        {error ? <div className="mt-3 text-xs text-red-600">{error}</div> : null}
 
         {!loading && !error ? (
-          <div className="mt-4 space-y-2">
+          <div className="mt-3 space-y-1.5">
             {sortedExecution.map((v) => (
               <div
                 key={v.rule.id}
-                className={`rounded-2xl border p-4 ${
+                className={`rounded-2xl border p-3.5 ${
                   v.rule.is_active
                     ? "border-black/10 bg-white/65 dark:border-white/15 dark:bg-white/[0.1]"
                     : "border-red-300/60 bg-red-50/40 dark:border-red-400/40 dark:bg-red-500/10"
                 }`}
               >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex min-w-0 items-start gap-3">
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex min-w-0 items-start gap-2.5">
                     <div className="min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <div className="text-base font-semibold text-[#111827] dark:text-slate-100">{v.rule.name}</div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <div className="text-sm font-semibold text-[#111827] dark:text-slate-100">{v.rule.name}</div>
                         {getIsGlobalDefaultFromRule(v.rule) ? (
                           <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-700 dark:bg-violet-500/20 dark:text-violet-300">
                             GLOBAL DEFAULT
@@ -1806,11 +1806,11 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     <button
                       type="button"
                       onClick={() => openEdit(v.rule)}
-                      className="rounded-md p-2 text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+                      className="rounded-lg p-1.5 text-slate-700 transition-colors hover:bg-[#1E88E5]/12 hover:text-[#1E88E5] dark:text-slate-200 dark:hover:bg-[#1E88E5]/20 dark:hover:text-[#8ec5ff]"
                       aria-label={`Edit ${v.rule.name}`}
                     >
                       <Pencil className="h-4 w-4" />
@@ -1818,7 +1818,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                     <button
                       type="button"
                       onClick={() => handleDeleteRequest(v.rule)}
-                      className="rounded-md p-2 text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+                      className="rounded-full border border-red-200/80 p-1.5 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:border-red-400/35 dark:text-red-300 dark:hover:bg-red-500/20 dark:hover:text-red-200"
                       aria-label={`Delete ${v.rule.name}`}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -1831,7 +1831,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
             <button
               type="button"
               onClick={openCreate}
-              className="mt-3 flex w-full flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-black/20 bg-white/40 px-4 py-8 text-slate-700 hover:bg-white/60 dark:border-white/20 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+              className="mt-2.5 flex w-full flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-black/20 bg-white/40 px-3 py-6 text-xs text-slate-700 hover:bg-white/60 dark:border-white/20 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
             >
               <Plus className="h-5 w-5" />
               <span className="font-semibold">Insert New Execution Rule</span>
@@ -1842,15 +1842,15 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
 
       {filterOpen && typeof document !== "undefined"
         ? createPortal(
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm">
           <div className="w-full max-w-xl overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/15 dark:bg-[#080D16]/95 dark:shadow-[0_20px_80px_rgba(0,0,0,0.55)]">
-            <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 dark:border-white/10">
-              <div className="text-lg font-bold text-[#111827] dark:text-slate-100">Filter Routing Rules</div>
+            <div className="flex items-center justify-between border-b border-black/10 px-4 py-3 dark:border-white/10">
+              <div className="text-base font-bold text-[#111827] dark:text-slate-100">Filter Routing Rules</div>
               <button className="rounded-lg p-2 text-slate-600 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10" onClick={() => setFilterOpen(false)} type="button">
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2.5 p-4 md:grid-cols-2">
               <label className="grid gap-1">
                 <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
                 <select
@@ -1892,7 +1892,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                 </select>
               </label>
             </div>
-            <div className="flex justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="flex justify-end gap-1.5 border-t border-black/10 bg-black/[0.02] px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
               <button
                 type="button"
                 onClick={() =>
@@ -1917,11 +1917,11 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
 
       {modalOpen && typeof document !== "undefined"
         ? createPortal(
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm">
+        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/35 p-3 backdrop-blur-sm">
           <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/15 dark:bg-[#080D16]/95 dark:shadow-[0_20px_80px_rgba(0,0,0,0.55)]">
-            <div className="flex items-center justify-between border-b border-black/10 px-6 py-5 dark:border-white/10">
+            <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 dark:border-white/10">
               <div>
-                <div className="text-lg font-bold text-[#111827] dark:text-slate-100">{editOpen ? "Edit Execution Rule" : "Create New Execution Rule"}</div>
+                <div className="text-base font-bold text-[#111827] dark:text-slate-100">{editOpen ? "Edit Execution Rule" : "Create New Execution Rule"}</div>
                 <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">Define logic parameters for systemic execution.</p>
               </div>
               <button
@@ -1935,7 +1935,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-3 p-5">
+            <div className="grid grid-cols-1 gap-2.5 p-4">
               {!isOrgScopedAdmin ? (
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">
@@ -1984,7 +1984,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                 </label>
               ) : null}
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Rule Name</span>
                   <input
@@ -2012,7 +2012,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                 />
               </div>
 
-              <div className="grid grid-cols-1 gap-3 rounded-xl border border-black/10 bg-black/[0.03] p-4 mb-2 dark:border-white/10 dark:bg-white/[0.04] md:grid-cols-2">
+              <div className="mb-1.5 grid grid-cols-1 gap-2.5 rounded-xl border border-black/10 bg-black/[0.03] p-3.5 dark:border-white/10 dark:bg-white/[0.04] md:grid-cols-2">
                 <MultiSelectDropdown
                   label="Categories"
                   placeholder="All categories"
@@ -2061,7 +2061,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                 </div>
               </div>
             </div>
-            <div className="flex items-center justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-6 py-4 dark:border-white/10 dark:bg-white/[0.03]">
+            <div className="flex items-center justify-end gap-1.5 border-t border-black/10 bg-black/[0.02] px-5 py-3 dark:border-white/10 dark:bg-white/[0.03]">
               <button
                 type="button"
                 onClick={() => {
@@ -2089,10 +2089,10 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
 
       {deleteConfirmOpen && deleteTargetRule && typeof document !== "undefined"
         ? createPortal(
-            <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+            <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-3 backdrop-blur-sm">
               <div className="w-full max-w-md overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/15 dark:bg-[#080D16]/95 dark:shadow-[0_20px_80px_rgba(0,0,0,0.55)]">
-                <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 dark:border-white/10">
-                  <div className="text-lg font-bold text-[#111827] dark:text-slate-100">
+                <div className="flex items-center justify-between border-b border-black/10 px-4 py-3 dark:border-white/10">
+                  <div className="text-base font-bold text-[#111827] dark:text-slate-100">
                     {deleteConfirmGlobalChoice ? "Delete Global Default Rule" : "Delete routing rule"}
                   </div>
                   <button
@@ -2103,20 +2103,20 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                     <X className="h-5 w-5" />
                   </button>
                 </div>
-                <div className="p-5">
+                <div className="p-4">
                   {deleteConfirmGlobalChoice ? (
-                    <div className="text-sm text-slate-700 dark:text-slate-200">
+                    <div className="text-xs text-slate-700 dark:text-slate-200">
                       This is a <span className="font-semibold">GLOBAL DEFAULT</span> rule. Choose whether you want to delete it only for the
                       selected organisation (<span className="font-semibold">{selectedOrgId || "-"}</span>) or for all organisations.
                     </div>
                   ) : (
-                    <div className="text-sm text-slate-700 dark:text-slate-200">
+                    <div className="text-xs text-slate-700 dark:text-slate-200">
                       Delete <span className="font-semibold text-[#111827] dark:text-slate-100">&quot;{deleteTargetRule.name}&quot;</span>? This
                       cannot be undone.
                     </div>
                   )}
                 </div>
-                <div className="flex justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
+                <div className="flex justify-end gap-1.5 border-t border-black/10 bg-black/[0.02] px-4 py-3 dark:border-white/10 dark:bg-white/[0.03]">
                   <button
                     type="button"
                     className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"

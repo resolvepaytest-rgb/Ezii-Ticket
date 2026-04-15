@@ -463,10 +463,6 @@ export function AgentsPage({ orgId }: { orgId: string }) {
         </div>
       </div>
 
-      <div className="text-right text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
-        Showing {filtered.filter((r) => r.online).length} active agents
-      </div>
-
       <GlassCard className="min-w-0 overflow-hidden border-black/10 bg-white/75 p-0 dark:border-white/10 dark:bg-white/[0.05]">
         <div className="overflow-x-auto">
           <table className="min-w-full border-collapse text-xs">

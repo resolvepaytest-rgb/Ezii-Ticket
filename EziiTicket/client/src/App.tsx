@@ -514,6 +514,14 @@ function writeStorage(key: string, value: string | null) {
   }
 }
 
+function isTokenLoginPath(pathname: string): boolean {
+  const parts = pathname.split("/").filter(Boolean);
+  return (
+    (parts.length === 4 && parts[0] === "auth" && parts[1] === "login") ||
+    (parts.length === 2 && parts[0] === "id")
+  );
+}
+
 export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -535,6 +543,9 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(true);
   /** Shown while `authLoading`: brief splash, then token/session check via `authMe`. */
   const [authGateStep, setAuthGateStep] = useState<"splash" | "checking">("splash");
+  const [showTokenLoginBootstrapUi, setShowTokenLoginBootstrapUi] = useState(() =>
+    isTokenLoginPath(location.pathname)
+  );
 
   const [profile, setProfile] = useState<ExternalUserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -597,6 +608,7 @@ export default function App() {
     const parts = location.pathname.split("/").filter(Boolean);
     let handled = false;
     if (parts.length === 4 && parts[0] === "auth" && parts[1] === "login") {
+      setShowTokenLoginBootstrapUi(true);
       const orgId = parts[2]!;
       const token = parts[3]!;
       try {
@@ -609,6 +621,7 @@ export default function App() {
       });
       handled = true;
     } else if (parts.length === 2 && parts[0] === "id") {
+      setShowTokenLoginBootstrapUi(true);
       const token = parts[1]!;
       try {
         localStorage.setItem("jwt_token", token);
@@ -626,6 +639,13 @@ export default function App() {
       navigate("/", { replace: true });
     }
   }, [location.pathname, navigate]);
+
+  useEffect(() => {
+    if (authLoading || (user && !permissionsLoaded)) return;
+    if (showTokenLoginBootstrapUi) {
+      setShowTokenLoginBootstrapUi(false);
+    }
+  }, [authLoading, user, permissionsLoaded, showTokenLoginBootstrapUi]);
 
   useEffect(() => {
     // Load user claims once on app startup (avoid full-shell reload on every route change)
@@ -1279,6 +1299,16 @@ export default function App() {
       : "loading";
 
   if (authLoading || (user && !permissionsLoaded)) {
+    if (!showTokenLoginBootstrapUi) {
+      return (
+        <ThemeProvider>
+          <AppToaster />
+          <div className="flex min-h-svh items-center justify-center p-6">
+            <Loader label="Loading..." size="md" />
+          </div>
+        </ThemeProvider>
+      );
+    }
     return (
       <ThemeProvider>
         <AppToaster />

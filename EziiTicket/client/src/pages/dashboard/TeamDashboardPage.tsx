@@ -315,11 +315,11 @@ function CustomerMyDashboard({
   }, [authUser, userIdNum, users]);
 
   return (
-    <div className="min-h-full">
-      <div className="mx-auto max-w-[1320px] px-4 pt-2 pb-4">
-        <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <div className="min-h-full text-[13px]">
+      <div className="mx-auto max-w-[1320px] px-3 pt-1.5 pb-3">
+        <div className="mb-4 flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Welcome back, {firstName}</h1>
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">Welcome back, {firstName}</h1>
             <p className="mt-1 text-xs text-muted-foreground">
               Everything looks good today. You have{" "}
               <span className="font-semibold text-[hsl(var(--brand))]">{activeTickets.length} tickets</span> awaiting your input.
@@ -329,7 +329,7 @@ function CustomerMyDashboard({
             <button
               type="button"
               onClick={() => onNavigateToTickets?.()}
-              className="inline-flex items-center gap-1.5 rounded-xl border border-border bg-card px-4 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
+              className="inline-flex items-center gap-1 rounded-xl border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground transition-colors hover:bg-muted dark:bg-white/[0.06] dark:hover:bg-white/[0.1]"
             >
               <Clock3 className="h-3.5 w-3.5" />
               View History
@@ -337,7 +337,7 @@ function CustomerMyDashboard({
             <button
               type="button"
               onClick={() => onNavigateToCreateTicket?.()}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-[hsl(var(--brand))] px-4 py-2 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+              className="inline-flex items-center gap-1 rounded-xl bg-[hsl(var(--brand))] px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
             >
               <Plus className="h-3.5 w-3.5" />
               Create New Ticket
@@ -345,8 +345,8 @@ function CustomerMyDashboard({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <GlassCard className="p-5">
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+          <GlassCard className="p-3.5">
             <div className="flex items-start justify-between">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-100 dark:bg-blue-950/45">
                 <Clock3 className="h-4 w-4 text-blue-600 dark:text-blue-300" />
@@ -355,13 +355,13 @@ function CustomerMyDashboard({
                 Active
               </span>
             </div>
-            <div className="mt-3 text-[30px] font-bold tabular-nums leading-none text-foreground">
+            <div className="mt-3 text-[26px] font-bold tabular-nums leading-none text-foreground">
               {String(myOpenCount).padStart(2, "0")}
             </div>
-            <div className="mt-2 text-sm font-medium text-muted-foreground">My Open Tickets</div>
+            <div className="mt-2 text-xs font-medium text-muted-foreground">My Open Tickets</div>
           </GlassCard>
 
-          <GlassCard className="p-5">
+          <GlassCard className="p-3.5">
             <div className="flex items-start justify-between">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-100 dark:bg-orange-950/45">
                 <Hourglass className="h-4 w-4 text-orange-600 dark:text-orange-300" />
@@ -370,13 +370,13 @@ function CustomerMyDashboard({
                 Waiting
               </span>
             </div>
-            <div className="mt-3 text-[30px] font-bold tabular-nums leading-none text-foreground">
+            <div className="mt-3 text-[26px] font-bold tabular-nums leading-none text-foreground">
               {String(pendingMyInputCount).padStart(2, "0")}
             </div>
-            <div className="mt-2 text-sm font-medium text-muted-foreground">Pending My Input</div>
+            <div className="mt-2 text-xs font-medium text-muted-foreground">Pending My Input</div>
           </GlassCard>
 
-          <GlassCard className="p-5">
+          <GlassCard className="p-3.5">
             <div className="flex items-start justify-between">
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-100 dark:bg-emerald-950/45">
                 <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-300" />
@@ -385,17 +385,17 @@ function CustomerMyDashboard({
                 Resolved
               </span>
             </div>
-            <div className="mt-3 text-[30px] font-bold tabular-nums leading-none text-foreground">
+            <div className="mt-3 text-[26px] font-bold tabular-nums leading-none text-foreground">
               {String(recentlyResolvedCount).padStart(2, "0")}
             </div>
-            <div className="mt-2 text-sm font-medium text-muted-foreground">Recently Resolved</div>
+            <div className="mt-2 text-xs font-medium text-muted-foreground">Recently Resolved</div>
           </GlassCard>
         </div>
 
-        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12">
           <GlassCard className="overflow-hidden p-0 lg:col-span-8">
-            <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-              <h2 className="text-lg font-semibold text-foreground">Active Support Tickets</h2>
+            <div className="flex items-center justify-between border-b border-border px-4 py-3">
+              <h2 className="text-base font-semibold text-foreground">Active Support Tickets</h2>
               <button
                 type="button"
                 onClick={() => onNavigateToTickets?.()}
@@ -405,13 +405,13 @@ function CustomerMyDashboard({
               </button>
             </div>
             <div className="overflow-x-auto scrollbar-slim">
-              <table className="w-full min-w-[660px] text-left text-sm">
+              <table className="w-full min-w-[660px] text-left text-xs">
                 <thead>
                   <tr className="bg-muted/50 text-[10px] font-bold uppercase tracking-wide text-muted-foreground dark:bg-muted/25">
-                    <th className="px-5 py-3">Ticket ID</th>
-                    <th className="px-4 py-3">Subject</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-5 py-3 text-right">SLA Countdown</th>
+                    <th className="px-4 py-2.5">Ticket ID</th>
+                    <th className="px-3 py-2.5">Subject</th>
+                    <th className="px-3 py-2.5">Status</th>
+                    <th className="px-4 py-2.5 text-right">SLA Countdown</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -427,14 +427,14 @@ function CustomerMyDashboard({
                       const urgent = sla === "Due" || /m left|h/.test(sla);
                       return (
                         <tr key={row.id} className="hover:bg-muted/35 dark:hover:bg-white/[0.04]">
-                          <td className="px-5 py-3.5 font-semibold text-[hsl(var(--brand))]">{row.ticket_code}</td>
-                          <td className="max-w-[360px] px-4 py-3.5">
+                          <td className="px-4 py-3 font-semibold text-[hsl(var(--brand))]">{row.ticket_code}</td>
+                          <td className="max-w-[360px] px-3 py-3">
                             <div className="line-clamp-2 leading-snug text-[13px] font-semibold text-foreground">{row.subject}</div>
                             <div className="mt-1 text-[11px] text-muted-foreground">
                               Updated {new Date(row.updated_at).toLocaleDateString()}
                             </div>
                           </td>
-                          <td className="px-4 py-3.5">
+                          <td className="px-3 py-3">
                             <span
                               className={cn(
                                 "inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
@@ -446,7 +446,7 @@ function CustomerMyDashboard({
                           </td>
                           <td
                             className={cn(
-                              "px-5 py-3.5 text-right text-sm font-semibold tabular-nums",
+                              "px-4 py-3 text-right text-sm font-semibold tabular-nums",
                               urgent ? "text-red-600 dark:text-red-400" : "text-foreground/80"
                             )}
                           >
@@ -461,21 +461,21 @@ function CustomerMyDashboard({
             </div>
           </GlassCard>
 
-          <div className="space-y-4 lg:col-span-4">
+          <div className="space-y-3 lg:col-span-4">
             <div>
               <div className="mb-2 flex items-center gap-2">
                 <Megaphone className="h-4 w-4 text-foreground/80" />
-                <h2 className="text-xl font-semibold leading-none text-foreground">Announcements</h2>
+                <h2 className="text-lg font-semibold leading-none text-foreground">Announcements</h2>
               </div>
-              <GlassCard className="bg-orange-50/70 p-4 dark:bg-orange-950/18">
-                <div className="text-base font-semibold text-foreground">Scheduled Maintenance</div>
-                <p className="mt-1 text-sm leading-snug text-muted-foreground">
+              <GlassCard className="bg-orange-50/70 p-3.5 dark:bg-orange-950/18">
+                <div className="text-sm font-semibold text-foreground">Scheduled Maintenance</div>
+                <p className="mt-1 text-xs leading-snug text-muted-foreground">
                   Central US region nodes will be upgraded this Sunday, 02:00 AM UTC. Expect minor latency.
                 </p>
               </GlassCard>
-              <GlassCard className="mt-3 p-4">
-                <div className="text-base font-semibold text-foreground">New Knowledge Base Section</div>
-                <p className="mt-1 text-sm leading-snug text-muted-foreground">
+              <GlassCard className="mt-2.5 p-3.5">
+                <div className="text-sm font-semibold text-foreground">New Knowledge Base Section</div>
+                <p className="mt-1 text-xs leading-snug text-muted-foreground">
                   We added a comprehensive guide on API v3 migrations.
                 </p>
                 <button type="button" className="mt-2 text-xs font-semibold text-[hsl(var(--brand))] hover:underline">
@@ -484,8 +484,8 @@ function CustomerMyDashboard({
               </GlassCard>
             </div>
             <div>
-              <h3 className="mb-2 text-lg font-semibold text-foreground">Quick Resources</h3>
-              <GlassCard className="p-4">
+              <h3 className="mb-2 text-base font-semibold text-foreground">Quick Resources</h3>
+              <GlassCard className="p-3.5">
                 <div className="text-sm font-semibold text-foreground">User Manual 2026</div>
                 <div className="mt-1 text-xs text-muted-foreground">Updated documentation and setup notes.</div>
               </GlassCard>
@@ -692,23 +692,23 @@ function OrgAdminDashboard({
   const chartGradId = useId().replace(/:/g, "");
 
   return (
-    <div className="min-h-full">
-      <div className="mx-auto max-w-[1400px] px-4 pt-2">
-        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+    <div className="min-h-full text-[13px]">
+      <div className="mx-auto max-w-[1400px] px-3 pt-1.5">
+        <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">Organisation Dashboard</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <h1 className="text-xl font-semibold tracking-tight text-foreground">Organisation Dashboard</h1>
+            <p className="mt-1 text-xs text-muted-foreground">
               Organisation overview, SLA health, and priority work.
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             {loading ? (
               <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
                 <Loader2 className="h-3.5 w-3.5 animate-spin text-[hsl(var(--brand))]" />
                 Updating…
               </span>
             ) : null}
-            <GlassCard className="flex items-center gap-2 px-3 py-2">
+            <GlassCard className="flex items-center gap-1.5 px-2.5 py-1.5">
               <span className="text-xs text-muted-foreground">Refresh</span>
               <select
                 value={String(refreshSeconds)}
@@ -723,23 +723,23 @@ function OrgAdminDashboard({
         </div>
 
         {/* KPI row */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <GlassCard className="p-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <GlassCard className="p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[hsl(var(--brand)/0.15)] dark:bg-[hsl(var(--brand)/0.25)]">
                 <Monitor className="h-5 w-5 text-[hsl(var(--brand))]" />
               </div>
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Active</span>
             </div>
-            <div className="mt-4 text-sm font-medium text-muted-foreground">Open Tickets</div>
-            <div className="mt-1 text-3xl font-bold tabular-nums text-foreground">{openCount}</div>
+            <div className="mt-4 text-xs font-medium text-muted-foreground">Open Tickets</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums text-foreground">{openCount}</div>
             <div className="mt-3 flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--brand))]">
               <ArrowUp className="h-3.5 w-3.5" />
               {openTrendText}
             </div>
           </GlassCard>
 
-          <GlassCard className="p-6">
+          <GlassCard className="p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-950/50">
                 <ClipboardList className="h-5 w-5 text-orange-600 dark:text-orange-400" />
@@ -748,15 +748,15 @@ function OrgAdminDashboard({
                 Action required
               </span>
             </div>
-            <div className="mt-4 text-sm font-medium text-muted-foreground">Pending My Response</div>
-            <div className="mt-1 text-3xl font-bold tabular-nums text-foreground">{pendingMyResponse.length}</div>
+            <div className="mt-4 text-xs font-medium text-muted-foreground">Pending My Response</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums text-foreground">{pendingMyResponse.length}</div>
             <div className="mt-3 flex items-center gap-1.5 text-xs font-medium text-orange-600 dark:text-orange-400">
               <AlertTriangle className="h-3.5 w-3.5" />
               {urgentPending.length} urgent items
             </div>
           </GlassCard>
 
-          <GlassCard className="p-6">
+          <GlassCard className="p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-emerald-100 dark:bg-emerald-950/45">
                 <BadgeCheck className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
@@ -765,8 +765,8 @@ function OrgAdminDashboard({
                 Performance
               </span>
             </div>
-            <div className="mt-4 text-sm font-medium text-muted-foreground">SLA Compliance</div>
-            <div className="mt-1 text-3xl font-bold tabular-nums text-foreground">
+            <div className="mt-4 text-xs font-medium text-muted-foreground">SLA Compliance</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums text-foreground">
               {slaCompliancePct != null ? `${slaCompliancePct.toFixed(1)}%` : "—"}
             </div>
             <div className="mt-3 flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
@@ -775,15 +775,15 @@ function OrgAdminDashboard({
             </div>
           </GlassCard>
 
-          <GlassCard className="p-6">
+          <GlassCard className="p-4">
             <div className="flex items-start justify-between gap-3">
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-muted dark:bg-muted/50">
                 <Smile className="h-5 w-5 text-muted-foreground" />
               </div>
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Feedback</span>
             </div>
-            <div className="mt-4 text-sm font-medium text-muted-foreground">CSAT 30-day Avg</div>
-            <div className="mt-1 text-3xl font-bold tabular-nums text-foreground">{csatAvg.toFixed(1)}/5</div>
+            <div className="mt-4 text-xs font-medium text-muted-foreground">CSAT 30-day Avg</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums text-foreground">{csatAvg.toFixed(1)}/5</div>
             <div className="mt-3 flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--brand))]">
               <ThumbsUp className="h-3.5 w-3.5" />
               High satisfaction
@@ -792,8 +792,8 @@ function OrgAdminDashboard({
         </div>
 
         {/* Charts + service */}
-        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-12">
-          <GlassCard className="p-6 lg:col-span-4">
+        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12">
+          <GlassCard className="p-4 lg:col-span-4">
             <div className="mb-4 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-foreground">Ticket Volume by Product</h2>
               <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -815,7 +815,7 @@ function OrgAdminDashboard({
             </div>
           </GlassCard>
 
-          <GlassCard className="p-6 lg:col-span-4">
+          <GlassCard className="p-4 lg:col-span-4">
             <div className="mb-4 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-foreground">CSAT Trend</h2>
               <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -856,32 +856,32 @@ function OrgAdminDashboard({
             </div>
           </GlassCard>
 
-          <GlassCard className="flex flex-col justify-between border-0 bg-gradient-to-br from-[hsl(var(--brand))] to-[hsl(var(--brand-2))] p-6 text-white shadow-lg dark:from-[hsl(var(--brand)/0.92)] dark:to-[hsl(var(--brand-2)/0.88)] dark:shadow-black/40 lg:col-span-4">
+          <GlassCard className="flex flex-col justify-between border-0 bg-gradient-to-br from-[hsl(var(--brand))] to-[hsl(var(--brand-2))] p-4 text-white shadow-lg dark:from-[hsl(var(--brand)/0.92)] dark:to-[hsl(var(--brand-2)/0.88)] dark:shadow-black/40 lg:col-span-4">
             <div>
               <Signal className="h-5 w-5 opacity-90" />
               <p className="mt-3 text-[10px] font-bold uppercase tracking-widest opacity-90">Service status</p>
-              <h3 className="mt-2 text-xl font-bold">Platform Active</h3>
-              <p className="mt-2 text-sm leading-relaxed opacity-95">
+              <h3 className="mt-2 text-lg font-bold">Platform Active</h3>
+              <p className="mt-2 text-xs leading-relaxed opacity-95">
                 Ezii platform is running at full capacity. All core services are operational for your organisation.
               </p>
             </div>
-            <div className="mt-6 grid grid-cols-2 gap-4 border-t border-white/25 pt-4">
+            <div className="mt-4 grid grid-cols-2 gap-3 border-t border-white/25 pt-3">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">Avg uptime</div>
-                <div className="mt-1 text-lg font-semibold tabular-nums">99.98%</div>
+                <div className="mt-1 text-base font-semibold tabular-nums">99.98%</div>
               </div>
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">Response</div>
-                <div className="mt-1 text-lg font-semibold tabular-nums">120ms</div>
+                <div className="mt-1 text-base font-semibold tabular-nums">120ms</div>
               </div>
             </div>
           </GlassCard>
         </div>
 
         {/* Table + announcements */}
-        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-12">
           <GlassCard className="overflow-hidden p-0 lg:col-span-8">
-            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+            <div className="flex items-center justify-between border-b border-border px-5 py-3">
               <h2 className="text-sm font-semibold text-foreground">Recent Priority Tickets (P1 &amp; P2)</h2>
               <button
                 type="button"
@@ -892,15 +892,15 @@ function OrgAdminDashboard({
               </button>
             </div>
             <div className="overflow-x-auto scrollbar-slim">
-              <table className="w-full min-w-[640px] text-left text-sm">
+              <table className="w-full min-w-[640px] text-left text-xs">
                 <thead>
                   <tr className="bg-muted/60 text-[10px] font-bold uppercase tracking-wider text-muted-foreground dark:bg-muted/30">
-                    <th className="px-6 py-3">Ticket ID</th>
-                    <th className="px-4 py-3">Subject</th>
-                    <th className="px-4 py-3">Priority</th>
-                    <th className="px-4 py-3">Agent</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-6 py-3">Next SLA</th>
+                    <th className="px-5 py-2.5">Ticket ID</th>
+                    <th className="px-3 py-2.5">Subject</th>
+                    <th className="px-3 py-2.5">Priority</th>
+                    <th className="px-3 py-2.5">Agent</th>
+                    <th className="px-3 py-2.5">Status</th>
+                    <th className="px-5 py-2.5">Next SLA</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
@@ -923,12 +923,12 @@ function OrgAdminDashboard({
                         slaIso != null && new Date(slaIso).getTime() - nowMs < 15 * 60 * 1000;
                       return (
                         <tr key={row.id} className="hover:bg-muted/40 dark:hover:bg-white/[0.04]">
-                          <td className="px-6 py-4 font-semibold text-foreground">#{row.ticket_code}</td>
-                          <td className="max-w-[220px] px-4 py-4">
+                          <td className="px-5 py-3.5 font-semibold text-foreground">#{row.ticket_code}</td>
+                          <td className="max-w-[220px] px-3 py-3.5">
                             <div className="line-clamp-1 font-semibold text-foreground">{row.subject}</div>
                             <div className="line-clamp-1 text-xs text-muted-foreground">Updated recently</div>
                           </td>
-                          <td className="px-4 py-4">
+                          <td className="px-3 py-3.5">
                             <span
                               className={cn(
                                 "inline-flex rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase",
@@ -938,15 +938,15 @@ function OrgAdminDashboard({
                               {pri.label}
                             </span>
                           </td>
-                          <td className="px-4 py-4">
-                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted text-xs font-bold text-foreground dark:bg-muted/60">
+                          <td className="px-3 py-3.5">
+                            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-[11px] font-bold text-foreground dark:bg-muted/60">
                               {initials}
                             </div>
                           </td>
-                          <td className="px-4 py-4 text-xs font-semibold text-orange-600 dark:text-orange-400">{st}</td>
+                          <td className="px-3 py-3.5 text-xs font-semibold text-orange-600 dark:text-orange-400">{st}</td>
                           <td
                             className={cn(
-                              "px-6 py-4 text-xs font-semibold tabular-nums",
+                              "px-5 py-3.5 text-xs font-semibold tabular-nums",
                               urgentSla
                                 ? "text-red-600 dark:text-red-400"
                                 : "text-foreground/80 dark:text-foreground/90"
@@ -968,9 +968,9 @@ function OrgAdminDashboard({
               <Megaphone className="h-5 w-5 text-foreground/80" />
               <h2 className="text-sm font-semibold text-foreground">Announcements</h2>
             </div>
-            <div className="space-y-4">
+            <div className="space-y-3">
               <GlassCard className="overflow-hidden p-0">
-                <div className="border-l-4 border-orange-500 py-4 pl-4 pr-4 dark:border-orange-400">
+                <div className="border-l-4 border-orange-500 py-3 pl-3.5 pr-3.5 dark:border-orange-400">
                   <div className="text-[10px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">
                     Maintenance
                   </div>
@@ -982,7 +982,7 @@ function OrgAdminDashboard({
                 </div>
               </GlassCard>
               <GlassCard className="overflow-hidden p-0">
-                <div className="border-l-4 border-[hsl(var(--brand))] py-4 pl-4 pr-4">
+                <div className="border-l-4 border-[hsl(var(--brand))] py-3 pl-3.5 pr-3.5">
                   <div className="text-[10px] font-bold uppercase tracking-wide text-[hsl(var(--brand))]">
                     Feature release
                   </div>
@@ -1096,15 +1096,15 @@ export function TeamDashboardPage({
   }
 
   return (
-    <div className="max-w-7xl min-h-full bg-muted/25 pb-8 dark:bg-transparent">
-      <div className="mb-4">
-        <div className="text-2xl font-semibold tracking-tight text-foreground">{title}</div>
+    <div className="max-w-7xl min-h-full bg-muted/25 pb-6 text-[13px] dark:bg-transparent">
+      <div className="mb-3">
+        <div className="text-xl font-semibold tracking-tight text-foreground">{title}</div>
       </div>
 
-      <GlassCard className="p-5">
+      <GlassCard className="p-3.5">
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <div className="text-lg font-semibold text-foreground">Dashboard Snapshot</div>
+            <div className="text-base font-semibold text-foreground">Dashboard Snapshot</div>
             <div className="text-xs text-muted-foreground">PRD-aligned widgets for current role and view mode.</div>
           </div>
           <div className="flex items-center gap-2">
@@ -1123,15 +1123,15 @@ export function TeamDashboardPage({
         </div>
       </GlassCard>
 
-      <div className="mt-5" />
+      <div className="mt-3.5" />
 
-      <GlassCard className="p-5">
-        <div className="mb-3 text-lg font-semibold text-foreground">Widgets</div>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <GlassCard className="p-3.5">
+        <div className="mb-3 text-base font-semibold text-foreground">Widgets</div>
+        <div className="grid grid-cols-1 gap-2.5 md:grid-cols-2">
           {widgets.map((widget) => (
             <div
               key={widget.key}
-              className="rounded-xl border border-border bg-muted/40 p-4 dark:bg-white/[0.04]"
+              className="rounded-xl border border-border bg-muted/40 p-3 dark:bg-white/[0.04]"
             >
               <div>
                 <div className="text-sm font-semibold">{widget.title}</div>
