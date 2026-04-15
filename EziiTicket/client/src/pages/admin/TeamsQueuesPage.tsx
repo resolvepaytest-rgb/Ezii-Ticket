@@ -953,9 +953,10 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 {filteredQueues.map((q) => {
                   const team = q.team_id ? teamById.get(q.team_id) ?? null : null;
                   const teamStats = team ? teamStatsById[team.id] : null;
-                  const orgName =
-                    externalOrgs.find((o) => Number(o.id) === Number(q.organisation_id))?.organization_name ??
-                    `Organization ${q.organisation_id}`;
+                  const orgName = isSystemAdminUser
+                    ? externalOrgs.find((o) => Number(o.id) === Number(q.organisation_id))?.organization_name ??
+                      `Organization ${q.organisation_id}`
+                    : null;
                   const queueDemand = Math.max(8, Math.round((teamStats?.capacity ?? 0) * 0.7));
                   const status = teamStats && queueDemand > (teamStats.capacity || 0) ? "high" : "stable";
                   return (
@@ -968,7 +969,9 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                               ? `• ${productById.get(Number(q.product_id ?? 0))?.name}`
                               : ""}{" "}
                             {team?.name ? `• ${team.name}` : "• Unassigned Team"}{" "}
-                            <span className="font-semibold text-[#1E88E5] dark:text-sky-300">{`• ${orgName}`}</span>
+                            {orgName ? (
+                              <span className="font-semibold text-[#1E88E5] dark:text-sky-300">{`• ${orgName}`}</span>
+                            ) : null}
                           </div>
                         </div>
                         <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${status === "high" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300" : "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300"}`}>
@@ -1274,7 +1277,7 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 ) : null}
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Team Name</span>
-                  <input value={createTeamForm.name} onChange={(e) => setCreateTeamForm((f) => ({ ...f, name: e.target.value }))} className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10" />
+                  <input value={createTeamForm.name} onChange={(e) => setCreateTeamForm((f) => ({ ...f, name: e.target.value }))} placeholder="Enter team name" className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10" />
                 </label>
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Product *</span>
@@ -1427,23 +1430,23 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 <button type="button" onClick={() => setFilterOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
               <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-2">
-                <label className="grid gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
-                  <select
-                    value={queueFilter.orgId}
-                    onChange={(e) => setQueueFilter((f) => ({ ...f, orgId: e.target.value }))}
-                    className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10"
-                  >
-                    <option value="all">All Organizations</option>
-                    {isSystemAdminUser
-                      ? queueOrgOptions.map((o) => (
+                {isSystemAdminUser ? (
+                  <label className="grid gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
+                    <select
+                      value={queueFilter.orgId}
+                      onChange={(e) => setQueueFilter((f) => ({ ...f, orgId: e.target.value }))}
+                      className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10"
+                    >
+                      <option value="all">All Organizations</option>
+                      {queueOrgOptions.map((o) => (
                         <option key={o.id} value={o.id}>
                           {o.name}
                         </option>
-                      ))
-                      : <option value={orgId}>Organization {orgId}</option>}
-                  </select>
-                </label>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label className="grid gap-1 md:col-span-2">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Product</span>
                   <div className="rounded-xl border border-black/10 bg-white/85 p-2 dark:border-white/15 dark:bg-white/10">
@@ -1526,29 +1529,25 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 <button type="button" onClick={() => setCreateQueueOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
               <div className="grid gap-3 p-5">
-                <label className="grid gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Select Organization *</span>
-                  <select
-                    value={createQueueForm.organisation_id}
-                    onChange={(e) => setCreateQueueForm((f) => ({ ...f, organisation_id: e.target.value, team_id: "" }))}
-                    disabled={!isSystemAdminUser || createQueueForm.create_for_all_organisations}
-                    className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10 disabled:opacity-60"
-                  >
-                    {isSystemAdminUser ? (
-                      <>
-                        <option value="">Select organization</option>
-                        <option value="1">{ORG1_NAME}</option>
-                        {externalOrgs.map((o) => (
-                          <option key={o.id} value={o.id}>
-                            {o.organization_name}
-                          </option>
-                        ))}
-                      </>
-                    ) : (
-                      <option value={orgId}>{Number(orgId) === 1 ? ORG1_NAME : `Organization ${orgIdNum ?? "-"}`}</option>
-                    )}
-                  </select>
-                </label>
+                {isSystemAdminUser ? (
+                  <label className="grid gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Select Organization *</span>
+                    <select
+                      value={createQueueForm.organisation_id}
+                      onChange={(e) => setCreateQueueForm((f) => ({ ...f, organisation_id: e.target.value, team_id: "" }))}
+                      disabled={createQueueForm.create_for_all_organisations}
+                      className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10 disabled:opacity-60"
+                    >
+                      <option value="">Select organization</option>
+                      <option value="1">{ORG1_NAME}</option>
+                      {externalOrgs.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.organization_name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 {isSystemAdminUser ? (
                   <label className="flex items-center gap-2 rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-xs text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
                     <input
@@ -1568,7 +1567,7 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 ) : null}
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Queue Name *</span>
-                  <input value={createQueueForm.name} onChange={(e) => setCreateQueueForm((f) => ({ ...f, name: e.target.value }))} className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10" />
+                  <input value={createQueueForm.name} onChange={(e) => setCreateQueueForm((f) => ({ ...f, name: e.target.value }))} placeholder="Enter queue name" className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10" />
                 </label>
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Product *</span>
@@ -1628,17 +1627,19 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 <button type="button" onClick={() => setEditQueueOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
               <div className="grid gap-3 p-5">
-                <label className="grid gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
-                  <select value={editQueueForm.organisation_id} disabled className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs opacity-70 dark:border-white/15 dark:bg-white/10">
-                    <option value={editQueueForm.organisation_id}>
-                      {Number(editQueueForm.organisation_id) === 1
-                        ? ORG1_NAME
-                        : externalOrgs.find((o) => Number(o.id) === Number(editQueueForm.organisation_id))?.organization_name ??
-                          `Organization ${editQueueForm.organisation_id}`}
-                    </option>
-                  </select>
-                </label>
+                {isSystemAdminUser ? (
+                  <label className="grid gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
+                    <select value={editQueueForm.organisation_id} disabled className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs opacity-70 dark:border-white/15 dark:bg-white/10">
+                      <option value={editQueueForm.organisation_id}>
+                        {Number(editQueueForm.organisation_id) === 1
+                          ? ORG1_NAME
+                          : externalOrgs.find((o) => Number(o.id) === Number(editQueueForm.organisation_id))?.organization_name ??
+                            `Organization ${editQueueForm.organisation_id}`}
+                      </option>
+                    </select>
+                  </label>
+                ) : null}
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Queue Name</span>
                   <input value={editQueueForm.name} onChange={(e) => setEditQueueForm((f) => ({ ...f, name: e.target.value }))} className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10" />

@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { GlassCard } from "@components/common/GlassCard";
 import {
   createCustomField,
+  deleteCustomField,
   listCustomFields,
   listProducts,
   updateCustomField,
@@ -16,11 +17,11 @@ import {
   ChevronRight,
   Circle,
   CirclePlus,
-  Eye,
   Hash,
   Lock,
   Pencil,
   Plus,
+  Trash2,
   Type,
 } from "lucide-react";
 
@@ -110,6 +111,7 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
   const [rows, setRows] = useState<CustomField[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
 
   const [form, setForm] = useState({
@@ -223,13 +225,18 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
     }
   }
 
-  async function toggleActive(row: CustomField) {
+  async function handleDelete(row: CustomField) {
+    if (!window.confirm(`Delete custom field "${row.label}"? This cannot be undone.`)) return;
+    setDeletingId(row.id);
     try {
-      await updateCustomField(row.id, { is_active: !row.is_active });
+      await deleteCustomField(row.id);
+      if (editingId === row.id) clearDraft();
       await load();
-      toast.success(row.is_active ? "Field disabled." : "Field enabled.");
-    } catch {
-      toast.error("Failed to update field status.");
+      toast.success("Custom field deleted.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to delete custom field.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -237,10 +244,6 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
     <div className="mx-auto max-w-[1300px] min-w-0 space-y-4 pb-8">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Settings <span className="px-1 text-slate-300 dark:text-slate-600">›</span>
-            <span style={{ color: EZII_BRAND.primary }}>Custom Fields</span>
-          </div>
           <h1 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">Custom Fields Management</h1>
           <p className="mt-1 max-w-2xl text-xs text-slate-600 dark:text-slate-300">
             Define and manage product-specific metadata to capture granular ticket data across teams.
@@ -517,20 +520,19 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
                     <tr className="text-left text-[10px] uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">
                       <th className="px-4 py-2.5 font-semibold">Field Name</th>
                       <th className="px-4 py-2.5 font-semibold">Type</th>
-                      <th className="px-4 py-2.5 font-semibold">Access</th>
-                      <th className="px-4 py-2.5 font-semibold">Actions</th>
+                      <th className="px-4 py-2.5 font-semibold text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading ? (
                       <tr>
-                        <td colSpan={4} className="px-4 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                        <td colSpan={3} className="px-4 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
                           Loading fields...
                         </td>
                       </tr>
                     ) : sortedRows.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="px-4 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
+                        <td colSpan={3} className="px-4 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
                           No custom fields configured yet.
                         </td>
                       </tr>
@@ -561,19 +563,8 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
                               {prettyTypeName(r.field_type)}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-slate-700 dark:text-slate-300">
-                            <Eye className="h-3.5 w-3.5" />
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <button
-                                type="button"
-                                onClick={() => toggleActive(r)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-black/10 px-2 py-1 text-[11px] dark:border-white/10"
-                                title={r.is_active ? "Disable field" : "Enable field"}
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                              </button>
+                          <td className="px-4 py-3 text-right">
+                            <div className="inline-flex flex-wrap items-center justify-end gap-2">
                               <button
                                 type="button"
                                 onClick={() => startEdit(r)}
@@ -581,6 +572,16 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
                                 title="Edit field"
                               >
                                 <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void handleDelete(r)}
+                                disabled={deletingId === r.id}
+                                className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+                                title="Delete field"
+                                aria-label={`Delete field ${r.label}`}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
                           </td>

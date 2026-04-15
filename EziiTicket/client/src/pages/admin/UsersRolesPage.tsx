@@ -188,9 +188,9 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         listUserScopeOrg(targetOrgId),
         isSystemAdminUser && targetOrgId !== 1
           ? listOrganisationUserDirectory(targetOrgId, true).catch(() => ({
-              users: [] as OrgDirectoryUser[],
-              has_local_users: true,
-            }))
+            users: [] as OrgDirectoryUser[],
+            has_local_users: true,
+          }))
           : Promise.resolve({ users: [] as OrgDirectoryUser[], has_local_users: true }),
       ]);
       setRoles(rolesRes);
@@ -372,58 +372,79 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     const base: UserTableRow[] =
       isSystemAdminUser && activeOrgId !== 1 && directoryUsers.length > 0
         ? directoryUsers.map((d) => ({
-            user_id: d.user_id,
-            name: d.name,
-            email: d.email,
-            status: d.provisioned ? d.status : "active",
-            assignedRoleLabel: assignedRoleByUserId[d.user_id] ?? d.ticket_role ?? "",
-            provisioned: d.provisioned,
-            department: d.department ?? null,
-            originOrgId: d.origin_org_id ?? null,
-            scopeOrgId: d.scope_org_id ?? null,
-            levelLabel: tierSlugFromUserDesignation(assignedDesignationByUserId[d.user_id]) || "—",
-          }))
+          user_id: d.user_id,
+          name: d.name,
+          email: d.email,
+          status: d.provisioned ? d.status : "active",
+          assignedRoleLabel: assignedRoleByUserId[d.user_id] ?? d.ticket_role ?? "",
+          provisioned: d.provisioned,
+          department: d.department ?? null,
+          originOrgId: d.origin_org_id ?? null,
+          scopeOrgId: d.scope_org_id ?? null,
+          levelLabel: tierSlugFromUserDesignation(assignedDesignationByUserId[d.user_id]) || "—",
+        }))
         : isSystemAdminUser && activeOrgId !== 1
           ? scopeRows.map((r) => ({
-              user_id: r.user_id,
-              name: r.user_name ?? `User ${r.user_id}`,
-              email: r.email ?? "-",
-              status: r.is_active ? "active" : "suspended",
-              assignedRoleLabel:
-                assignedRoleByUserId[Number(r.user_id)] ?? r.ticket_role ?? "",
-              provisioned: true,
-              department: departmentByUserId[Number(r.user_id)] ?? null,
-              originOrgId: Number(r.origin_org_id),
-              scopeOrgId: Number(r.scope_org_id),
-              levelLabel:
-                tierSlugFromUserDesignation(assignedDesignationByUserId[Number(r.user_id)]) || "—",
-            }))
-          : users.map((u) => {
-              const sc = scopeRows.find((sr) => Number(sr.user_id) === Number(u.user_id));
-              return {
-                user_id: Number(u.user_id),
+            user_id: r.user_id,
+            name: r.user_name ?? `User ${r.user_id}`,
+            email: r.email ?? "-",
+            status: r.is_active ? "active" : "suspended",
+            assignedRoleLabel:
+              assignedRoleByUserId[Number(r.user_id)] ?? r.ticket_role ?? "",
+            provisioned: true,
+            department: departmentByUserId[Number(r.user_id)] ?? null,
+            originOrgId: Number(r.origin_org_id),
+            scopeOrgId: Number(r.scope_org_id),
+            levelLabel:
+              tierSlugFromUserDesignation(assignedDesignationByUserId[Number(r.user_id)]) || "—",
+          }))
+          : (() => {
+            const byUserId = new Map<number, UserTableRow>();
+            for (const u of users) {
+              const uid = Number(u.user_id);
+              const sc = scopeRows.find((sr) => Number(sr.user_id) === uid);
+              byUserId.set(uid, {
+                user_id: uid,
                 name: u.name || `User ${u.user_id}`,
                 email: u.email || "-",
                 status: u.status || "active",
-                assignedRoleLabel: assignedRoleByUserId[Number(u.user_id)] ?? "",
+                assignedRoleLabel: assignedRoleByUserId[uid] ?? "",
                 department:
                   (u.type_id_1 != null && String(u.type_id_1).trim()
                     ? String(u.type_id_1).trim()
-                    : null) ?? departmentByUserId[Number(u.user_id)] ?? null,
+                    : null) ?? departmentByUserId[uid] ?? null,
                 originOrgId: sc != null ? Number(sc.origin_org_id) : null,
                 scopeOrgId: sc != null ? Number(sc.scope_org_id) : null,
-                levelLabel:
-                  tierSlugFromUserDesignation(assignedDesignationByUserId[Number(u.user_id)]) || "—",
-              };
-            });
+                levelLabel: tierSlugFromUserDesignation(assignedDesignationByUserId[uid]) || "—",
+              });
+            }
+            // For org-admin/other non-system roles, keep invited Ezii users visible even when
+            // they only exist as scope rows (not persisted in this org's users table yet).
+            for (const sc of scopeRows) {
+              const uid = Number(sc.user_id);
+              if (byUserId.has(uid)) continue;
+              byUserId.set(uid, {
+                user_id: uid,
+                name: sc.user_name ?? `User ${uid}`,
+                email: sc.email ?? "-",
+                status: sc.is_active ? "active" : "suspended",
+                assignedRoleLabel: assignedRoleByUserId[uid] ?? sc.ticket_role ?? "",
+                department: departmentByUserId[uid] ?? null,
+                originOrgId: Number(sc.origin_org_id),
+                scopeOrgId: Number(sc.scope_org_id),
+                levelLabel: tierSlugFromUserDesignation(assignedDesignationByUserId[uid]) || "—",
+              });
+            }
+            return Array.from(byUserId.values());
+          })();
     const rows = !q
       ? base
       : base.filter(
-          (r) =>
-            r.name.toLowerCase().includes(q) ||
-            r.email.toLowerCase().includes(q) ||
-            String(r.user_id).includes(q)
-        );
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          r.email.toLowerCase().includes(q) ||
+          String(r.user_id).includes(q)
+      );
     rows.sort((a, b) => {
       const nameCmp = (a.name ?? "")
         .trim()
@@ -568,11 +589,11 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     const rows = !q
       ? candidates
       : candidates.filter(
-          (u) =>
-            (u.name ?? "").toLowerCase().includes(q) ||
-            (u.email ?? "").toLowerCase().includes(q) ||
-            String(u.user_id).includes(q)
-        );
+        (u) =>
+          (u.name ?? "").toLowerCase().includes(q) ||
+          (u.email ?? "").toLowerCase().includes(q) ||
+          String(u.user_id).includes(q)
+      );
     rows.sort((a, b) => {
       const nameCmp = (a.name ?? "")
         .trim()
@@ -750,12 +771,12 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         inviteBatchSupportLevelId = existing
           ? existing.id
           : (
-              await createDesignation({
-                organisation_id: activeOrgId,
-                name: slug,
-                code: slug.toUpperCase().replace(/\s+/g, "_"),
-              })
-            ).id;
+            await createDesignation({
+              organisation_id: activeOrgId,
+              name: slug,
+              code: slug.toUpperCase().replace(/\s+/g, "_"),
+            })
+          ).id;
       }
 
       for (const selectedUserId of invite.selectedUserIds) {
@@ -1198,49 +1219,10 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         </div>
       </div>
 
-      <GlassCard className="border-black/10 bg-white/35 p-6 dark:border-white/10 dark:bg-white/[0.06]">
-        <div className="text-[11px] font-bold uppercase tracking-wide text-[#1E88E5]">
-          Active Target Organization
-        </div>
-        <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="grid grid-cols-2 gap-2 text-center">
-            {splitTenantUserSections ? (
-              <>
-                <div className="rounded-xl border border-black/10 bg-white/65 px-5 py-2 dark:border-white/10 dark:bg-white/10">
-                  <div className="text-2xl font-bold text-[#1E88E5]">{customerRows.length}</div>
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                    Customer Users
-                  </div>
-                </div>
-                <div className="rounded-xl border border-black/10 bg-white/65 px-5 py-2 dark:border-white/10 dark:bg-white/10">
-                  <div className="text-2xl font-bold text-[#1E88E5]">{eziiInvitedRows.length}</div>
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                    Invited Users (Ezii)
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="rounded-xl border border-black/10 bg-white/65 px-5 py-3 dark:border-white/10 dark:bg-white/10">
-                  <div className="text-3xl font-bold text-[#1E88E5]">{visibleRows.length}</div>
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Total Users</div>
-                </div>
-                <div className="rounded-xl border border-black/10 bg-white/65 px-5 py-3 dark:border-white/10 dark:bg-white/10">
-                  <div className="text-3xl font-bold text-[#1E88E5]">
-                    {visibleRows.filter((r) => r.assignedRoleLabel.toLowerCase().includes("admin")).length}
-                  </div>
-                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Admins</div>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </GlassCard>
-
       {isSystemAdminUser &&
-      activeOrgId != null &&
-      activeOrgId !== 1 &&
-      missingInvitedEziiRoles.length > 0 ? (
+        activeOrgId != null &&
+        activeOrgId !== 1 &&
+        missingInvitedEziiRoles.length > 0 ? (
         <GlassCard className="border border-amber-300/70 bg-amber-50/50 p-4 dark:border-amber-800/60 dark:bg-amber-950/25">
           <p className="text-xs leading-relaxed text-amber-950 dark:text-amber-100">
             <span className="font-semibold">Action required:</span> For this organization, invite at least
@@ -1254,7 +1236,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         <GlassCard className="border border-amber-300/70 bg-amber-50/50 p-4 dark:border-amber-800/60 dark:bg-amber-950/25">
           <p className="text-xs leading-relaxed text-amber-950 dark:text-amber-100">
             <span className="font-semibold">This organization has no rows in the ticket users table yet.</span> The list
-            below may show people from Ezii (client-worker-master) for reference only. Click{" "}
+            below may show people from Resolve Biz Services Pvt Ltd (worker-master) for reference only. Click{" "}
             <strong>Sync Users</strong> to import <strong>active</strong> employees for the selected org. After a
             successful sync, reopening this org will load from the database only—no extra client-worker-master call.
           </p>
@@ -1271,7 +1253,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         </GlassCard>
       ) : (
         <GlassCard className="border-black/10 bg-white/40 p-0 dark:border-white/10 dark:bg-white/[0.06]">
-          <div className="border-b border-black/10 px-5 py-4 dark:border-white/10">
+          <div className="border-b border-black/10 px-5 py-2 dark:border-white/10">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="relative max-w-sm flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -1281,6 +1263,36 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                   placeholder="Filter by name or email..."
                   className="w-full rounded-xl border border-black/10 bg-white/75 py-2 pl-9 pr-3 text-xs dark:border-white/10 dark:bg-white/10"
                 />
+              </div>
+              <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div className="grid grid-cols-2 gap-2 text-center">
+                  {splitTenantUserSections ? (
+                    <>
+                      <div className="rounded-xl border border-black/10 bg-white/65 px-5 py-2 dark:border-white/10 dark:bg-white/10">
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                          Customer Users: <span className="text-lg font-bold text-[#1E88E5]">{customerRows.length}</span>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-black/10 bg-white/65 px-5 py-2 dark:border-white/10 dark:bg-white/10">
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">
+                          Invited Users (Ezii): <span className="text-lg font-bold text-[#1E88E5]">{eziiInvitedRows.length}</span>
+                        </div>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="rounded-xl border border-black/10 bg-white/65 px-5 py-2 dark:border-white/10 dark:bg-white/10">
+                        <div className="text-[13px] font-bold uppercase tracking-wide text-slate-500">
+                          Total Users: <span className="text-xl font-bold text-[#1E88E5]">{visibleRows.length}</span>
+                        </div>
+                      </div>
+                      <div className="rounded-xl border border-black/10 bg-white/65 px-5 py-2 dark:border-white/10 dark:bg-white/10">
+                        <div className="text-[13px] font-bold uppercase tracking-wide text-slate-500">
+                          Admins: <span className="text-xl font-bold text-[#1E88E5]">{visibleRows.filter((r) => r.assignedRoleLabel.toLowerCase().includes("admin")).length}</span></div>
+                      </div>
+                    </>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
@@ -1517,9 +1529,8 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                             : [...prev.selectedUserIds, uid],
                         }))
                       }
-                      className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left ${
-                        selected ? "bg-[#1E88E5]/10" : "hover:bg-black/5 dark:hover:bg-white/10"
-                      }`}
+                      className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left ${selected ? "bg-[#1E88E5]/10" : "hover:bg-black/5 dark:hover:bg-white/10"
+                        }`}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{u.name}</div>
@@ -1534,9 +1545,8 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                         </div>
                       ) : null}
                       <div
-                        className={`h-4 w-4 shrink-0 rounded-full border ${
-                          selected ? "border-[#1E88E5] bg-[#1E88E5]" : "border-slate-300"
-                        }`}
+                        className={`h-4 w-4 shrink-0 rounded-full border ${selected ? "border-[#1E88E5] bg-[#1E88E5]" : "border-slate-300"
+                          }`}
                       />
                     </button>
                   );

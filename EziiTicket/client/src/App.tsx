@@ -940,11 +940,16 @@ export default function App() {
     [isSystemAdminInterface, screenAccess]
   );
 
-  /** Customers never use the system-admin shell; shared `dashboard` screen maps to organisation dashboard. */
+  /** When true, render platform admin pages (Users, SLA, Custom fields, etc.) for this `activeNav`. */
+  const renderSystemAdminShellRoutes =
+    SYSTEM_ADMIN_SHELL_KEYS.has(activeNav) && canRenderSystemAdminRoute(activeNav);
+
+  /**
+   * System-admin / org-admin chrome (header + layout). Granted customer/agent users keep the default shell
+   * while still rendering admin route content when `renderSystemAdminShellRoutes` is true.
+   */
   const showSystemAdminChrome =
-    !isCustomerExperience &&
-    SYSTEM_ADMIN_SHELL_KEYS.has(activeNav) &&
-    canRenderSystemAdminRoute(activeNav);
+    (isSystemAdminInterface || isOrgAdminShell) && renderSystemAdminShellRoutes;
 
   /** Agent / team_lead shell: My view items respect `screen_access` Team/Agent keys. */
   const shellBaseSidebarItems = useMemo(() => {
@@ -1336,7 +1341,7 @@ export default function App() {
             </div>
           ) : (
             <>
-              {showSystemAdminChrome ? (
+              {renderSystemAdminShellRoutes ? (
                 <>
                 {activeNav === "sys_dashboard" ? (
                   <SystemOverviewDashboardPage
@@ -1369,7 +1374,9 @@ export default function App() {
                   <PriorityMasterPage orgId={activeOrgId} organizationName={profile?.organization_name} />
                 ) : null}
                 {activeNav === "keyword_routing" ? <KeywordsRoutingPage orgId={activeOrgId} /> : null}
-                {activeNav === "sla_policies" ? <SlaPoliciesPage orgId={activeOrgId} /> : null}
+                {activeNav === "sla_policies" ? (
+                  <SlaPoliciesPage orgId={activeOrgId} organizationName={profile?.organization_name} />
+                ) : null}
                 {activeNav === "notification_templates" ? (
                   <NotificationTemplatesPage orgId={activeOrgId} />
                 ) : null}

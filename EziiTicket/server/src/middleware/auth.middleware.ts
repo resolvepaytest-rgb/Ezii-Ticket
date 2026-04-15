@@ -19,7 +19,7 @@ function getBearerToken(req: Request) {
   return token;
 }
 
-function normalizeRoleNameKey(name: string | null | undefined): string {
+export function normalizeRoleNameKey(name: string | null | undefined): string {
   return String(name ?? "")
     .trim()
     .toLowerCase()

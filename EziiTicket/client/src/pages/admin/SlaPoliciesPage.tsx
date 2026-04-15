@@ -185,10 +185,12 @@ type BoundsDraftRow = {
 
 export function SlaPoliciesPage({
   orgId,
+  organizationName,
   tier1Access: _tier1AccessProp,
   tier2Access: _tier2AccessProp,
 }: {
   orgId: string;
+  organizationName?: string;
   tier1Access?: AccessLevel;
   tier2Access?: AccessLevel;
 }) {
@@ -263,9 +265,10 @@ export function SlaPoliciesPage({
   const globalBoundsMap = useMemo(() => boundsMapFromRows(boundsByOrg[1]), [boundsByOrg]);
 
   const overrideOrgCards = useMemo(() => {
+    const ownOrgLabel = organizationName?.trim() || `Organization ${orgIdNum ?? "-"}`;
     const source = isSystemAdmin
       ? externalOrgs.map((o) => ({ id: Number(o.id), name: o.organization_name }))
-      : [{ id: orgIdNum ?? 0, name: `Organization ${orgIdNum ?? "-"}` }];
+      : [{ id: orgIdNum ?? 0, name: ownOrgLabel }];
     const q = searchOrg.trim().toLowerCase();
     return source
       .filter((o) => Number.isFinite(o.id) && o.id > 0)
@@ -290,7 +293,7 @@ export function SlaPoliciesPage({
         });
         return { ...o, compliant };
       });
-  }, [externalOrgs, isSystemAdmin, orgIdNum, rowsByOrg, boundsByOrg, searchOrg, globalTier2]);
+  }, [externalOrgs, isSystemAdmin, orgIdNum, organizationName, rowsByOrg, boundsByOrg, searchOrg, globalTier2]);
 
   const editingOrgName =
     overrideOrgCards.find((o) => o.id === editingOrgId)?.name ??
@@ -433,14 +436,6 @@ export function SlaPoliciesPage({
         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-300">
           <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
           Last Updated: {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-          <button
-            type="button"
-            onClick={() => void load()}
-            className="ml-2 inline-flex items-center gap-1 rounded-lg border border-black/10 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Global Refresh
-          </button>
         </div>
       </div>
 

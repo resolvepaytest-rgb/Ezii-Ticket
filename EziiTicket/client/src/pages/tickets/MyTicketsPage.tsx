@@ -839,23 +839,7 @@ export function MyTicketsPage({
             <Star className="h-5 w-5 fill-amber-400 text-amber-400" aria-hidden />
           </div>
         </div>
-        <div className="relative overflow-hidden rounded-xl border border-[#1e293b] bg-gradient-to-br from-[#1e293b] to-[#0f172a] p-4 text-white shadow-md dark:border-white/10 dark:from-[#0f172a] dark:to-[#020617]">
-          <Zap
-            className="pointer-events-none absolute -bottom-1 right-2 h-12 w-12 text-white/10 dark:text-white/15"
-            aria-hidden
-          />
-          <div className="text-xs font-semibold">Efficiency insight</div>
-          <p className="mt-1.5 text-[11px] leading-relaxed text-slate-300 dark:text-slate-400">
-            Leave-related tickets are spiking by 24%. Consider updating the FAQ for &apos;Annual Encashment&apos; to reduce
-            ticket load.
-          </p>
-          <button
-            type="button"
-            className="mt-3 inline-flex items-center rounded-lg border border-white/40 px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider text-white transition hover:bg-white/10"
-          >
-            Analyze trends
-          </button>
-        </div>
+       
       </div>
 
       <div className="mb-3 flex flex-col gap-2 rounded-xl border border-black/5 bg-slate-100/80 px-3 py-2.5 dark:border-white/10 dark:bg-white/[0.04] sm:flex-row sm:items-center sm:justify-between">

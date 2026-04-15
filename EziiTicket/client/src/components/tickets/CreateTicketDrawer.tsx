@@ -15,6 +15,12 @@ const MAX_FILES = 10;
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = [".pdf", ".jpg", ".jpeg", ".png", ".xlsx", ".csv", ".docx"] as const;
 
+/** API may return bigint ids as strings; form state uses numbers from selects. */
+function numericIdEq(selected: number | "", id: unknown): boolean {
+  if (selected === "") return false;
+  return Number(id) === Number(selected);
+}
+
 export function CreateTicketDrawer({ open, onClose, onCreated }: CreateTicketDrawerProps) {
   type ReviewSnapshot = {
     productName: string;
@@ -56,15 +62,15 @@ export function CreateTicketDrawer({ open, onClose, onCreated }: CreateTicketDra
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const selectedCategory = useMemo(
-    () => categories.find((c) => c.id === categoryId) ?? null,
+    () => categories.find((c) => numericIdEq(categoryId, c.id)) ?? null,
     [categories, categoryId]
   );
   const selectedProduct = useMemo(
-    () => products.find((p) => p.id === productId) ?? null,
+    () => products.find((p) => numericIdEq(productId, p.id)) ?? null,
     [products, productId]
   );
   const selectedSubcategory = useMemo(
-    () => selectedCategory?.subcategories.find((s) => s.id === subcategoryId) ?? null,
+    () => selectedCategory?.subcategories.find((s) => numericIdEq(subcategoryId, s.id)) ?? null,
     [selectedCategory, subcategoryId]
   );
 
@@ -254,9 +260,9 @@ export function CreateTicketDrawer({ open, onClose, onCreated }: CreateTicketDra
       return;
     }
 
-    const selectedProd = products.find((p) => p.id === pid);
-    const selectedCat = categories.find((c) => c.id === cid);
-    const selectedSub = selectedCat?.subcategories.find((s) => s.id === sid);
+    const selectedProd = products.find((p) => numericIdEq(pid, p.id));
+    const selectedCat = categories.find((c) => numericIdEq(cid, c.id));
+    const selectedSub = selectedCat?.subcategories.find((s) => numericIdEq(sid, s.id));
 
     const productName = selectedProd?.name ?? "-";
     const categoryName = selectedCat?.name ?? "-";
@@ -429,7 +435,7 @@ export function CreateTicketDrawer({ open, onClose, onCreated }: CreateTicketDra
                         setSubcategoryId(nextSubcategoryId);
                         latestSubcategoryIdRef.current = nextSubcategoryId;
                       }}
-                      disabled={categoryId === "" || !selectedCategory?.subcategories?.length}
+                      disabled={categoryId === "" || loadingCategories}
                       className="w-full rounded-lg border border-black/10 bg-white/5 px-3 py-2 disabled:opacity-50 dark:border-white/10"
                     >
                       <option value="">— Select sub-category —</option>
