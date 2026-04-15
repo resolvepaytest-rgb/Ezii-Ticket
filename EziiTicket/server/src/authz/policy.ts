@@ -176,20 +176,43 @@ export function canModifyScreen(policy: EffectivePolicy | null, screenKey: Scree
 
 export function canDo(policy: EffectivePolicy | null, actionKey: ActionKey): boolean {
   if (!policy) return false;
-  if (policy.actions[actionKey] !== undefined) return Boolean(policy.actions[actionKey]);
   if (policy.has_system_admin) return true;
+  const explicit = policy.actions[actionKey];
+  if (explicit === true) return true;
   if (env.permissionStrictActions) return false;
+
+  const hasTicketsScreen = Boolean(
+    policy.screens.tickets?.view ||
+      policy.screens.tickets?.modify ||
+      policy.screens.my_tickets?.view ||
+      policy.screens.my_tickets?.modify ||
+      policy.screens.agent_my_tickets?.view ||
+      policy.screens.agent_my_tickets?.modify
+  );
 
   // Legacy fallback while action keys are not fully backfilled in role JSON.
   if (actionKey === "tickets.list") {
     return (
+      hasTicketsScreen ||
       policy.ticket_access === "assigned_queue" ||
       policy.ticket_access === "product_queue_escalated" ||
       policy.ticket_access === "org_tickets" ||
       policy.ticket_access === "all_tickets"
     );
   }
+  if (actionKey === "tickets.list_my") {
+    return true;
+  }
   if (actionKey === "tickets.read") {
+    return true;
+  }
+  if (actionKey === "tickets.create") {
+    return (
+      Boolean(policy.screens.raise_a_ticket?.view || policy.screens.raise_a_ticket?.modify) ||
+      hasTicketsScreen
+    );
+  }
+  if (actionKey === "notifications.read" || actionKey === "notifications.mark_read") {
     return true;
   }
   if (actionKey === "tickets.internal_notes.read") {

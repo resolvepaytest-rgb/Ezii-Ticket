@@ -348,10 +348,41 @@ export async function setUserRoles(req: Request, res: Response) {
   if (!authOrgId) return res.status(400).json({ ok: false, error: "invalid requester organisation" });
   const scopedOrgId = asInt(scope_organisation_id);
 
-  // Default behavior: preserve existing global role assignment (scope = null).
+  // If scope is omitted, infer customer scope so edits replace scoped role instead of adding a global one.
+  // Inference order:
+  // 1) Existing scoped user_roles (single distinct scope)
+  // 2) Active user_scope_org mapping (single distinct scope)
+  // 3) Home organisation for non-HQ users
+  let inferredScopeOrgId: number | null = null;
+  if (scopedOrgId == null) {
+    const scopedRoleRows = await pool.query<{ scope_organisation_id: string }>(
+      `select distinct scope_organisation_id::text
+       from user_roles
+       where user_id = $1
+         and scope_organisation_id is not null`,
+      [userId]
+    );
+    if ((scopedRoleRows.rowCount ?? 0) === 1) {
+      inferredScopeOrgId = Number(scopedRoleRows.rows[0].scope_organisation_id);
+    } else {
+      const scopeOrgRows = await pool.query<{ scope_org_id: string }>(
+        `select distinct scope_org_id::text
+         from user_scope_org
+         where user_id = $1
+           and is_active = true`,
+        [userId]
+      );
+      if ((scopeOrgRows.rowCount ?? 0) === 1) {
+        inferredScopeOrgId = Number(scopeOrgRows.rows[0].scope_org_id);
+      } else if (userOrgId !== TEMPLATE_ROLES_ORG_ID) {
+        inferredScopeOrgId = userOrgId;
+      }
+    }
+  }
+
   // For Ezii System Admin, optional scope_organisation_id allows cross-org workload mapping.
-  const effectiveScopeOrgId = scopedOrgId ?? null;
-  const rolesOrgId = scopedOrgId ?? userOrgId;
+  const effectiveScopeOrgId = scopedOrgId ?? inferredScopeOrgId;
+  const rolesOrgId = effectiveScopeOrgId ?? userOrgId;
   const isCrossOrgScope = scopedOrgId != null && scopedOrgId !== userOrgId;
   if (isCrossOrgScope && !isEziiSystemAdmin(req)) {
     return res.status(403).json({

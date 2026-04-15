@@ -56,10 +56,14 @@ export function AppShell({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userPanelOpen, setUserPanelOpen] = useState(false);
 
-  const initialText = (userInfo?.name || userLabel || "U")
-    .trim()
-    .slice(0, 2)
-    .toUpperCase();
+  const initialText = (() => {
+    const name = (userInfo?.name || userLabel || "U").trim();
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+    }
+    return name.slice(0, 2).toUpperCase();
+  })();
 
   useEffect(() => {
     if (!mobileOpen) return;

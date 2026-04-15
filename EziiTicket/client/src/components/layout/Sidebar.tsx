@@ -49,30 +49,29 @@ export function Sidebar({
         className
       )}
     >
-      <div className="scrollbar-slim flex-1 min-h-0 overflow-y-auto pr-1">
-        {/* Make logo/name part of the scrollable content. */}
-        <div className="mb-3 px-2 py-2 text-center">
-          <div className="mx-auto">
-            {orgLogoUrl ? (
-              <img
-                src={orgLogoUrl}
-                alt={orgName}
-                className="mx-auto h-16 w-auto max-w-full object-contain dark:rounded-md dark:bg-white/95 dark:px-2 dark:py-1"
-              />
-            ) : (
-              <div className="mx-auto h-14 w-14 rounded-xl bg-primary/20 ring-1 ring-black/10 dark:ring-white/10" />
-            )}
-          </div>
-          <div className="mt-2 min-w-0">
-            <div className="truncate text-sm font-semibold leading-tight">{orgName}</div>
-            {orgSubtitle ? (
-              <div className="truncate text-xs text-muted-foreground">{orgSubtitle}</div>
-            ) : null}
-          </div>
+      <div className="mb-3 px-2 py-2 text-center">
+        <div className="mx-auto">
+          {orgLogoUrl ? (
+            <img
+              src={orgLogoUrl}
+              alt={orgName}
+              className="mx-auto h-16 w-auto max-w-full object-contain dark:rounded-md dark:bg-white/95 dark:px-2 dark:py-1"
+            />
+          ) : (
+            <div className="mx-auto h-14 w-14 rounded-xl bg-primary/20 ring-1 ring-black/10 dark:ring-white/10" />
+          )}
         </div>
+        <div className="mt-2 min-w-0">
+          <div className="truncate text-sm font-semibold leading-tight">{orgName}</div>
+          {orgSubtitle ? (
+            <div className="truncate text-xs text-muted-foreground">{orgSubtitle}</div>
+          ) : null}
+        </div>
+      </div>
 
-        <div className="my-3 h-px w-full bg-black/10 dark:bg-white/10" />
+      <div className="my-3 h-px w-full bg-black/10 dark:bg-white/10" />
 
+      <div className="scrollbar-slim flex-1 min-h-0 overflow-y-auto pr-1">
         <nav className="flex flex-col gap-1">
           {items.length === 0 ? (
             <div className="rounded-xl border border-dashed border-black/15 bg-white/40 px-3 py-3 text-xs text-muted-foreground dark:border-white/20 dark:bg-white/5">

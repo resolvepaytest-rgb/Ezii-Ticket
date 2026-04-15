@@ -978,13 +978,6 @@ export default function App() {
   const renderSystemAdminShellRoutes =
     SYSTEM_ADMIN_SHELL_KEYS.has(activeNav) && canRenderSystemAdminRoute(activeNav);
 
-  /**
-   * System-admin / org-admin chrome (header + layout). Granted customer/agent users keep the default shell
-   * while still rendering admin route content when `renderSystemAdminShellRoutes` is true.
-   */
-  const showSystemAdminChrome =
-    (isSystemAdminInterface || isOrgAdminShell) && renderSystemAdminShellRoutes;
-
   /** Agent / team_lead shell: My view items respect `screen_access` Team/Agent keys. */
   const shellBaseSidebarItems = useMemo(() => {
     if (shellRoleKind === "org_admin") {
@@ -1334,6 +1327,7 @@ export default function App() {
         </ThemeProvider>
       );
     }
+
     return (
       <ThemeProvider>
         <AppToaster />
@@ -1347,11 +1341,27 @@ export default function App() {
     );
   }
 
+  const extendedProfile = profile as
+    | (ExternalUserProfile & {
+        designationName?: string | null;
+        designation_name?: string | null;
+        date_of_joining?: string | null;
+      })
+    | null;
+  const profileDesignation =
+    (extendedProfile?.designationName && extendedProfile.designationName.trim()) ||
+    (extendedProfile?.designation_name && extendedProfile.designation_name.trim()) ||
+    null;
+  const profileDateOfJoining =
+    typeof extendedProfile?.date_of_joining === "string" && extendedProfile.date_of_joining.trim().length > 0
+      ? extendedProfile.date_of_joining.trim()
+      : null;
+
   return (
     <ThemeProvider>
       <AppToaster />
       <AppShell
-        productName="ezii-ticketing"
+        productName="eziiticket"
         userLabel={
           profile
             ? `${profile.employer_name || profile.email} (${profile.user_id})`
@@ -1365,8 +1375,8 @@ export default function App() {
           email: profile?.email ?? null,
           employeeId: profile?.employee_number ?? null,
           roleName: meScopedRoleName ?? user?.role_name ?? null,
-          position: null,
-          dateOfJoining: null,
+          position: profileDesignation,
+          dateOfJoining: profileDateOfJoining,
         }}
         onLogout={handleLogout}
         sidebarOrgName={profile?.organization_name || ""}
@@ -1379,7 +1389,7 @@ export default function App() {
         showViewModeToggle={showDashboardViewToggle}
         viewMode={dashboardViewMode}
         onViewModeChange={setViewMode}
-        headerVariant={showSystemAdminChrome ? "system_admin" : "default"}
+        headerVariant="system_admin"
         onHeaderNotificationsClick={() => {
           setNotificationsOpen((v) => !v);
         }}

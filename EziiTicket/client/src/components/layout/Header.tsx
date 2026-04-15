@@ -58,12 +58,17 @@ export function Header({
   const toggleMode = useUIStore((s) => s.toggleMode);
   const [searchQuery, setSearchQuery] = useState("");
 
-  const initialText = (userInfo?.name || userLabel || "U")
-    .trim()
-    .slice(0, 2)
-    .toUpperCase();
+  const initialText = (() => {
+    const name = (userInfo?.name || userLabel || "U").trim();
+    const parts = name.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
+    }
+    return name.slice(0, 2).toUpperCase();
+  })();
   const unreadLabel =
     notificationUnreadCount > 9 ? "9+" : notificationUnreadCount > 0 ? String(notificationUnreadCount) : "";
+  const brandLabel = productName || "eziiticket";
 
   return (
     <div
@@ -93,9 +98,12 @@ export function Header({
               >
                 <Menu />
               </Button>
-              <div className="h-8 w-8 shrink-0 rounded-lg bg-primary/20 ring-1 ring-black/10 dark:ring-white/10" />
-              <span className="hidden max-w-[7rem] truncate text-sm font-semibold leading-none text-foreground sm:inline md:max-w-[9rem]">
-                {productName}
+              <span
+                className="hidden items-center text-xl font-bold leading-none tracking-tight sm:inline-flex"
+                aria-label={brandLabel}
+              >
+                <span className="text-[#1E88E5]">ezii</span>
+                <span className="text-[#F97316]">ticket</span>
               </span>
             </div>
 
@@ -184,10 +192,13 @@ export function Header({
               >
                 <Menu />
               </Button>
-              <div className="h-8 w-8 shrink-0 rounded-lg bg-primary/20 ring-1 ring-black/10 dark:ring-white/10" />
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold leading-none">
-                  {productName}
+                <div
+                  className="inline-flex items-center text-xl font-bold leading-none tracking-tight"
+                  aria-label={brandLabel}
+                >
+                  <span className="text-[#1E88E5]">ezii</span>
+                  <span className="text-[#F97316]">ticket</span>
                 </div>
               </div>
             </div>
