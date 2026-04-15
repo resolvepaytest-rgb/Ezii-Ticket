@@ -15,7 +15,7 @@ import {
   type SlaPolicy,
   type SlaTier1BoundRow,
 } from "@api/adminApi";
-import { Calendar, Globe, RefreshCw, Settings, ShieldCheck, X } from "lucide-react";
+import { Calendar, Globe, Settings, ShieldCheck, X } from "lucide-react";
 
 type PriorityKey = "P1" | "P2" | "P3" | "P4";
 type TierKey = "tier1" | "tier2";

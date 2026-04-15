@@ -33,7 +33,6 @@ import {
   RefreshCw,
   RotateCcw,
   Star,
-  Zap,
 } from "lucide-react";
 
 type MyTicketsPageProps = {
