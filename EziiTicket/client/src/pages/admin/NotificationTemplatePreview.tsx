@@ -98,7 +98,7 @@ function EmailChromeFrame({
         <div className="min-w-0 flex-1">
           <div className="text-base font-bold leading-snug text-[#0f172a] dark:text-slate-100">{previewSubjectPlain}</div>
           <div className="mt-1.5 text-[13px] text-slate-500 dark:text-slate-400">
-            From: Ezii System Notifications &lt;no-reply@ezii.com&gt;
+            From: Ezii System Notifications &lt;no-reply@ezii.co.in&gt;
           </div>
         </div>
         <span className="shrink-0 rounded-full bg-slate-200 px-3.5 py-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-600 dark:bg-slate-700 dark:text-slate-300">

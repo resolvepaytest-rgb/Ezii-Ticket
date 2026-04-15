@@ -12,7 +12,9 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EZII_BRAND } from "@/lib/eziiBrand";
 import { useUIStore } from "@store/useUIStore";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { HeaderSearchItem } from "./headerSearch";
 
 export type HeaderUserInfo = {
   name: string;
@@ -37,6 +39,8 @@ type HeaderProps = {
   onSettingsClick?: () => void;
   isUserPanelOpen?: boolean;
   onUserPanelToggle?: () => void;
+  searchItems?: HeaderSearchItem[];
+  onSearchSelect?: (key: string) => void;
   className?: string;
 };
 
@@ -52,11 +56,67 @@ export function Header({
   onSettingsClick,
   isUserPanelOpen,
   onUserPanelToggle,
+  searchItems = [],
+  onSearchSelect,
   className,
 }: HeaderProps) {
   const mode = useUIStore((s) => s.mode);
   const toggleMode = useUIStore((s) => s.toggleMode);
   const [searchQuery, setSearchQuery] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [activeResultIndex, setActiveResultIndex] = useState(-1);
+  const searchBlurTimerRef = useRef<number | null>(null);
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
+  const resultButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [searchOverlayRect, setSearchOverlayRect] = useState<{
+    top: number;
+    left: number;
+    width: number;
+  } | null>(null);
+  const trimmedQuery = searchQuery.trim().toLowerCase();
+  const searchResults = useMemo(() => {
+    if (!trimmedQuery) return searchItems;
+    return searchItems.filter(
+      (item) =>
+        item.label.toLowerCase().includes(trimmedQuery) ||
+        item.sectionLabel?.toLowerCase().includes(trimmedQuery)
+    );
+  }, [searchItems, trimmedQuery]);
+
+  useEffect(() => {
+    if (activeResultIndex < 0) return;
+    resultButtonRefs.current[activeResultIndex]?.scrollIntoView({ block: "nearest" });
+  }, [activeResultIndex]);
+
+  const selectSearchResult = (item: HeaderSearchItem) => {
+    if (searchBlurTimerRef.current) {
+      window.clearTimeout(searchBlurTimerRef.current);
+    }
+    onSearchSelect?.(item.key);
+    setSearchOpen(false);
+    setSearchQuery("");
+    setActiveResultIndex(-1);
+  };
+  useEffect(() => {
+    if (!searchOpen) return;
+    const updatePosition = () => {
+      const el = searchContainerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      setSearchOverlayRect({
+        top: rect.bottom + 6,
+        left: rect.left,
+        width: rect.width,
+      });
+    };
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [searchOpen]);
 
   const initialText = (() => {
     const name = (userInfo?.name || userLabel || "U").trim();
@@ -108,16 +168,126 @@ export function Header({
             </div>
 
             <div className="min-w-0 flex-1 px-1 sm:px-3">
-              <div className="relative mx-auto w-full max-w-2xl">
-                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <div ref={searchContainerRef} className="relative mx-auto w-full max-w-xl">
+                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
                 <input
                   type="search"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    const nextQuery = e.target.value;
+                    setSearchQuery(nextQuery);
+                    setActiveResultIndex(0);
+                    resultButtonRefs.current = [];
+                  }}
+                  onKeyDown={(e) => {
+                    if (!searchOpen || searchResults.length === 0) return;
+                    if (e.key === "ArrowDown" || e.key === "PageDown") {
+                      e.preventDefault();
+                      setActiveResultIndex((prev) => (prev + 1) % searchResults.length);
+                      return;
+                    }
+                    if (e.key === "ArrowUp" || e.key === "PageUp") {
+                      e.preventDefault();
+                      setActiveResultIndex((prev) =>
+                        prev <= 0 ? searchResults.length - 1 : prev - 1
+                      );
+                      return;
+                    }
+                    if (e.key === "Enter" && activeResultIndex >= 0) {
+                      e.preventDefault();
+                      const selected = searchResults[activeResultIndex];
+                      if (selected) selectSearchResult(selected);
+                      return;
+                    }
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setSearchOpen(false);
+                      setActiveResultIndex(-1);
+                    }
+                  }}
+                  onFocus={() => {
+                    setSearchOpen(true);
+                    setActiveResultIndex(searchResults.length > 0 ? 0 : -1);
+                  }}
+                  onBlur={() => {
+                    if (searchBlurTimerRef.current) {
+                      window.clearTimeout(searchBlurTimerRef.current);
+                    }
+                    searchBlurTimerRef.current = window.setTimeout(() => {
+                      setSearchOpen(false);
+                      setActiveResultIndex(-1);
+                    }, 120);
+                  }}
                   placeholder="Search across ETS..."
-                  className="h-10 w-full rounded-full border border-black/10 bg-white pl-10 pr-4 text-sm text-foreground shadow-sm outline-none ring-[#1E88E5]/25 placeholder:text-muted-foreground focus:ring-2 dark:border-white/15 dark:bg-white/10"
+                  className="h-8 w-full rounded-full border border-black/10 bg-white pl-8 pr-3 text-xs text-foreground shadow-sm outline-none ring-[#1E88E5]/25 placeholder:text-muted-foreground focus:ring-2 dark:border-white/15 dark:bg-white/10"
                   aria-label="Search across ETS"
+                  role="combobox"
+                  aria-expanded={searchOpen ? true : false}
+                  aria-controls="header-search-results"
+                  aria-activedescendant={
+                    activeResultIndex >= 0 ? `header-search-result-${activeResultIndex}` : undefined
+                  }
                 />
+                {searchOpen &&
+                searchOverlayRect &&
+                typeof document !== "undefined" &&
+                createPortal(
+                  <div
+                    className="fixed z-[70] overflow-hidden rounded-2xl border border-[#1E88E5]/25 bg-white shadow-2xl ring-1 ring-[#1E88E5]/20 dark:border-[#1E88E5]/35 dark:bg-zinc-900 dark:ring-[#1E88E5]/25"
+                    style={{
+                      top: searchOverlayRect.top,
+                      left: searchOverlayRect.left,
+                      width: searchOverlayRect.width,
+                    }}
+                  >
+                    <div className="border-b border-black/10 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground dark:border-white/10">
+                      Pages
+                    </div>
+                    {searchResults.length > 0 ? (
+                      <ul
+                        id="header-search-results"
+                        className="max-h-72 overflow-auto py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                        role="listbox"
+                      >
+                        {searchResults.map((item, index) => (
+                          <li key={item.key}>
+                            <button
+                              id={`header-search-result-${index}`}
+                              type="button"
+                              ref={(el) => {
+                                resultButtonRefs.current[index] = el;
+                              }}
+                              className={cn(
+                                "block w-full rounded-lg px-3 py-2 text-left hover:bg-black/[0.04] dark:hover:bg-white/10",
+                                activeResultIndex === index &&
+                                  "bg-[#1E88E5]/10 ring-1 ring-inset ring-[#1E88E5]/40 dark:bg-[#1E88E5]/20"
+                              )}
+                              role="option"
+                              aria-selected={activeResultIndex === index}
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                selectSearchResult(item);
+                              }}
+                              onMouseEnter={() => setActiveResultIndex(index)}
+                            >
+                              <span className="block text-sm font-medium text-foreground">{item.label}</span>
+                              {item.sectionLabel ? (
+                                <span className="mt-0.5 block text-xs text-muted-foreground">
+                                  {item.sectionLabel}
+                                </span>
+                              ) : null}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        No accessible screens found.
+                      </div>
+                    )}
+                  </div>,
+                  document.body
+                )}
               </div>
             </div>
 

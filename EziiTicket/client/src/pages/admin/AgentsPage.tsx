@@ -338,17 +338,17 @@ export function AgentsPage({ orgId }: { orgId: string }) {
   }, [externalOrgs]);
 
   return (
-    <div className="mx-auto max-w-[1300px] min-w-0 space-y-4 pb-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="mx-auto max-w-[1300px] min-w-0 space-y-3 pb-8">
+      <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Agents Management</h1>
-          <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+          <h1 className="text-xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">Agents Management</h1>
+          <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-300">
             Monitor team performance and distribution across all support tiers.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {isSystemAdminUser ? (
-            <label className="inline-flex items-center gap-1.5 rounded-2xl border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
+            <label className="inline-flex items-center gap-1 rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
               Org:
               <select
                 value={String(activeOrgId ?? "")}
@@ -361,14 +361,14 @@ export function AgentsPage({ orgId }: { orgId: string }) {
               </select>
             </label>
           ) : null}
-          <button className="inline-flex items-center gap-1.5 rounded-2xl border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
+          <button className="inline-flex items-center gap-1 rounded-xl border border-black/10 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
             <Download className="h-3.5 w-3.5" />
             Export CSV
           </button>
           <button
             type="button"
             onClick={() => toast.message("Invite flow", { description: "Invite New Agent modal can be wired next." })}
-            className="inline-flex items-center gap-1.5 rounded-2xl px-4 py-2 text-xs font-semibold text-white"
+            className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-[11px] font-semibold text-white"
             style={{ backgroundColor: EZII_BRAND.primary }}
           >
             <UserPlus className="h-3.5 w-3.5" />
@@ -377,53 +377,53 @@ export function AgentsPage({ orgId }: { orgId: string }) {
         </div>
       </div>
 
-      <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+      <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <GlassCard className="border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.05]">
           <div className="flex items-start justify-between">
             <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Total Agents</div>
-            <div className="rounded-2xl bg-[#1E88E5]/15 p-2 text-[#1E88E5]"><Users className="h-4 w-4" /></div>
+            <div className="rounded-xl bg-[#1E88E5]/15 p-1.5 text-[#1E88E5]"><Users className="h-3.5 w-3.5" /></div>
           </div>
-          <div className="mt-2 text-4xl font-semibold text-slate-900 dark:text-slate-100">{kpis.totalAgents}</div>
-          <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">In selected organisation</div>
+          <div className="mt-1.5 text-3xl font-semibold text-slate-900 dark:text-slate-100">{kpis.totalAgents}</div>
+          <div className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400">In selected organisation</div>
         </GlassCard>
-        <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+        <GlassCard className="border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.05]">
           <div className="flex items-start justify-between">
             <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Online Now</div>
-            <div className="rounded-2xl bg-amber-100 p-2 text-amber-700 dark:bg-amber-400/20 dark:text-amber-300"><Activity className="h-4 w-4" /></div>
+            <div className="rounded-xl bg-amber-100 p-1.5 text-amber-700 dark:bg-amber-400/20 dark:text-amber-300"><Activity className="h-3.5 w-3.5" /></div>
           </div>
-          <div className="mt-2 text-4xl font-semibold text-slate-900 dark:text-slate-100">{kpis.onlineNow}</div>
-          <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">{kpis.onlinePct}% of agents (active status)</div>
+          <div className="mt-1.5 text-3xl font-semibold text-slate-900 dark:text-slate-100">{kpis.onlineNow}</div>
+          <div className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400">{kpis.onlinePct}% of agents (active status)</div>
         </GlassCard>
-        <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+        <GlassCard className="border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.05]">
           <div className="flex items-start justify-between">
             <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Avg. CSAT Score</div>
-            <div className="rounded-2xl bg-blue-100 p-2 text-blue-700 dark:bg-blue-400/20 dark:text-blue-300"><Star className="h-4 w-4" /></div>
+            <div className="rounded-xl bg-blue-100 p-1.5 text-blue-700 dark:bg-blue-400/20 dark:text-blue-300"><Star className="h-3.5 w-3.5" /></div>
           </div>
-          <div className="mt-2 text-4xl font-semibold text-slate-900 dark:text-slate-100">
+          <div className="mt-1.5 text-3xl font-semibold text-slate-900 dark:text-slate-100">
             {kpis.avgCsat == null ? "—" : kpis.avgCsat.toFixed(2)}
           </div>
-          <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">From ticket CSAT scores (1–5)</div>
+          <div className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400">From ticket CSAT scores (1–5)</div>
         </GlassCard>
-        <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+        <GlassCard className="border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.05]">
           <div className="flex items-start justify-between">
             <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500 dark:text-slate-400">Avg. Workload</div>
-            <div className="rounded-2xl bg-red-100 p-2 text-red-700 dark:bg-red-400/20 dark:text-red-300"><CalendarClock className="h-4 w-4" /></div>
+            <div className="rounded-xl bg-red-100 p-1.5 text-red-700 dark:bg-red-400/20 dark:text-red-300"><CalendarClock className="h-3.5 w-3.5" /></div>
           </div>
-          <div className="mt-2 text-4xl font-semibold text-slate-900 dark:text-slate-100">
+          <div className="mt-1.5 text-3xl font-semibold text-slate-900 dark:text-slate-100">
             {kpis.avgWorkloadUtil == null ? "—" : `${Math.round(kpis.avgWorkloadUtil * 100)}%`}
           </div>
-          <div className="mt-1 text-xs text-slate-600 dark:text-slate-400">Avg. of open tickets vs cap (agents with a cap)</div>
+          <div className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400">Avg. of open tickets vs cap (agents with a cap)</div>
         </GlassCard>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="inline-flex rounded-2xl bg-slate-100 p-1 text-xs dark:bg-white/[0.08]">
           {(["all", "L1", "L2", "L3"] as const).map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setTierFilter(t)}
-              className={`rounded-xl px-4 py-1.5 font-semibold ${
+                className={`rounded-xl px-3 py-1 font-semibold ${
                 tierFilter === t ? "bg-white text-slate-800 shadow-sm dark:bg-white/15 dark:text-slate-100" : "text-slate-600 dark:text-slate-300"
               }`}
             >
@@ -431,8 +431,8 @@ export function AgentsPage({ orgId }: { orgId: string }) {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex items-center gap-1.5 rounded-2xl border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
+        <div className="flex items-center gap-1.5">
+          <label className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
             <Filter className="h-3.5 w-3.5" />
             Product:
             <select
@@ -446,7 +446,7 @@ export function AgentsPage({ orgId }: { orgId: string }) {
               ))}
             </select>
           </label>
-          <label className="inline-flex items-center gap-1.5 rounded-2xl border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
+          <label className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
             <Zap className="h-3.5 w-3.5" />
             Status:
             <select

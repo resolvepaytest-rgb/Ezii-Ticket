@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, CirclePlus } from "lucide-react";
+import { ChevronDown, ChevronRight, LayoutGrid, UserRound } from "lucide-react";
 import { getEtsSystemAdminSidebarItems } from "@/config/etsNavigation";
 import { cn } from "@/lib/utils";
 import { useState } from "react";
@@ -18,8 +18,6 @@ type SidebarProps = {
   items?: SidebarItem[];
   activeKey?: string;
   onSelect?: (key: string) => void;
-  showCreateTicketButton?: boolean;
-  onCreateTicketClick?: () => void;
   showViewModeToggle?: boolean;
   viewMode?: "team" | "my_view";
   onViewModeChange?: (mode: "team" | "my_view") => void;
@@ -33,8 +31,6 @@ export function Sidebar({
   items = getEtsSystemAdminSidebarItems(),
   activeKey,
   onSelect,
-  showCreateTicketButton = false,
-  onCreateTicketClick,
   showViewModeToggle = false,
   viewMode = "my_view",
   onViewModeChange,
@@ -45,7 +41,7 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        "flex h-full min-h-0 w-72 shrink-0 flex-col overflow-hidden border-r border-black/10 bg-white/5 p-3 backdrop-blur-xl supports-[backdrop-filter]:bg-white/10 dark:border-white/10",
+        "flex h-full min-h-0 w-64 shrink-0 flex-col overflow-hidden border-r border-black/10 bg-white/5 p-3 backdrop-blur-xl supports-[backdrop-filter]:bg-white/10 dark:border-white/10",
         className
       )}
     >
@@ -71,7 +67,7 @@ export function Sidebar({
 
       <div className="my-3 h-px w-full bg-black/10 dark:bg-white/10" />
 
-      <div className="scrollbar-slim flex-1 min-h-0 overflow-y-auto pr-1">
+      <div className="scrollbar-thinest flex-1 min-h-0 overflow-y-auto pr-0.5 ">
         <nav className="flex flex-col gap-1">
           {items.length === 0 ? (
             <div className="rounded-xl border border-dashed border-black/15 bg-white/40 px-3 py-3 text-xs text-muted-foreground dark:border-white/20 dark:bg-white/5">
@@ -143,50 +139,37 @@ export function Sidebar({
         </nav>
       </div>
 
-      {showViewModeToggle || showCreateTicketButton ? (
+      {showViewModeToggle ? (
         <div className="mt-2 space-y-2">
-          {showCreateTicketButton ? (
-            <div className="w-full rounded-xl bg-white/60 p-2 ring-1 ring-black/10 dark:bg-white/5 dark:ring-white/10">
+          <div className="h-px w-full bg-black/10 dark:bg-white/10 mb-2"/>
+          <div className="mx-auto grid w-full max-w-[12rem] grid-cols-2 gap-1.5 mb-2 mt-2">
             <button
               type="button"
-              onClick={() => onCreateTicketClick?.()}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-md transition-opacity hover:opacity-90"
+              onClick={() => onViewModeChange?.("team")}
+              className={cn(
+                "flex items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-semibold transition-all",
+                viewMode === "team"
+                  ? "border-[hsl(var(--brand))] bg-[hsl(var(--brand))] text-white shadow-sm"
+                  : "border-black/15 bg-transparent text-slate-600 hover:border-black/25 hover:text-slate-900 dark:border-white/20 dark:text-slate-300 dark:hover:border-white/35 dark:hover:text-white"
+              )}
             >
-              <CirclePlus className="h-4 w-4" />
-              <span>Create Ticket</span>
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Admin
+            </button>
+            <button
+              type="button"
+              onClick={() => onViewModeChange?.("my_view")}
+              className={cn(
+                "flex items-center justify-center gap-1 rounded-lg border px-2 py-1.5 text-xs font-semibold transition-all",
+                viewMode === "my_view"
+                  ? "border-[hsl(var(--brand))] bg-[hsl(var(--brand))] text-white shadow-sm"
+                  : "border-black/15 bg-transparent text-slate-600 hover:border-black/25 hover:text-slate-900 dark:border-white/20 dark:text-slate-300 dark:hover:border-white/35 dark:hover:text-white"
+              )}
+            >
+              <UserRound className="h-3.5 w-3.5" />
+              My View
             </button>
           </div>
-          ) : null}
-          {showViewModeToggle ? (
-            <div className="w-full rounded-xl bg-white/60 p-1.5 ring-1 ring-black/10 dark:bg-white/5 dark:ring-white/10">
-              <div className="inline-flex w-full rounded-lg  bg-card p-1">
-                <button
-                  type="button"
-                  onClick={() => onViewModeChange?.("team")}
-                  className={cn(
-                    "flex-1 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors",
-                    viewMode === "team"
-                      ? "bg-[hsl(var(--brand))] text-white"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  Admin
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onViewModeChange?.("my_view")}
-                  className={cn(
-                    "flex-1 rounded-md px-2 py-1.5 text-xs font-semibold transition-colors",
-                    viewMode === "my_view"
-                      ? "bg-[hsl(var(--brand))] text-white"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  My view
-                </button>
-              </div>
-            </div>
-          ) : null}
         </div>
       ) : null}
     </aside>

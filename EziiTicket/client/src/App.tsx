@@ -10,6 +10,7 @@ import { ThemeProvider } from "@components/common/ThemeProvider";
 import { loginByLink, loginByToken, authMe, getAuthMePermissions } from "@api/authApi";
 import { AppShell } from "@components/layout/AppShell";
 import type { SidebarItem } from "@components/layout/Sidebar";
+import { collectHeaderSearchItems } from "@components/layout/headerSearch";
 import { useAuthStore, type JwtUserClaims } from "@store/useAuthStore";
 import { useUIStore } from "@store/useUIStore";
 import { getExternalUserProfile, type ExternalUserProfile } from "@api/adminApi";
@@ -124,6 +125,7 @@ function preloadFrequentPages() {
 }
 
 const ACTIVE_ORG_STORAGE_KEY = "active-org-id";
+const JWT_TOKEN_STORAGE_KEY = "jwt_token";
 const DASHBOARD_VIEW_MODE_STORAGE_KEY = "view-mode";
 const DASHBOARD_REFRESH_STORAGE_KEY = "dashboard-refresh-seconds";
 
@@ -514,6 +516,29 @@ function writeStorage(key: string, value: string | null) {
   }
 }
 
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length < 2 || !parts[1]) return null;
+  const payloadPart = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+  const padded = payloadPart + "=".repeat((4 - (payloadPart.length % 4 || 4)) % 4);
+  try {
+    const decoded = atob(padded);
+    return JSON.parse(decoded) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function readOrgIdFromToken(): string | null {
+  const token = readStorage(JWT_TOKEN_STORAGE_KEY);
+  if (!token) return null;
+  const payload = decodeJwtPayload(token);
+  const orgId = payload?.org_id;
+  if (typeof orgId !== "string") return null;
+  const trimmed = orgId.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 function isTokenLoginPath(pathname: string): boolean {
   const parts = pathname.split("/").filter(Boolean);
   return (
@@ -548,11 +573,12 @@ export default function App() {
   );
 
   const [profile, setProfile] = useState<ExternalUserProfile | null>(null);
-  const [profileLoading, setProfileLoading] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
-  const [activeOrgId, setActiveOrgId] = useState<string | null>(
-    () => readStorage(ACTIVE_ORG_STORAGE_KEY) ?? null
-  );
+  const [activeOrgId, setActiveOrgId] = useState<string | null>(() => {
+    const persisted = readStorage(ACTIVE_ORG_STORAGE_KEY);
+    if (persisted) return persisted;
+    return readOrgIdFromToken();
+  });
   const [initialNavResolved, setInitialNavResolved] = useState(false);
   /** `roles.name` from `user_roles` for current org (may be "L3" while JWT `role_name` is still "customer"). */
   const [meScopedRoleName, setMeScopedRoleName] = useState<string | null>(null);
@@ -672,7 +698,7 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    setProfileLoading(true);
+    setActiveOrgId((prev) => prev ?? (user.org_id ?? null));
     setProfileError(null);
 
     void (async () => {
@@ -686,8 +712,6 @@ export default function App() {
         );
         setProfile(null);
         setActiveOrgId((prev) => prev ?? (user.org_id ?? null));
-      } finally {
-        setProfileLoading(false);
       }
     })();
   }, [user]);
@@ -803,10 +827,9 @@ export default function App() {
   /** Keep shell chrome stable: org permissions alone must not force org-admin shell unless primary role is org_admin. */
   const isPrimaryOrgAdminRole =
     normalizeRoleNameKeyForShell(meScopedRoleName ?? user?.role_name) === "org_admin";
-  const showCreateTicketButtonInSidebar =
-    isSystemAdminInterface ||
-    canDoAction(actionAccess, "tickets.create", false) ||
-    canViewCustomerNavKey("cust_raise_ticket", screenAccess);
+  const isAdminCustomerMyViewMode =
+    viewMode === "my_view" && isPrimaryOrgAdminRole;
+  const showCreateTicketButtonInSidebar = true;
   const hasCustomerScopedAccess =
     canViewCustomerDashboard ||
     canViewCustomerTickets ||
@@ -814,14 +837,16 @@ export default function App() {
     canViewCustomerNavKey("cust_guides", screenAccess) ||
     (isPrimaryCustomerRole && hasScreenViewAccess(screenAccess, "dashboard"));
   const canOpenTicketList =
-    isSystemAdminInterface ||
+    (!isAdminCustomerMyViewMode && isSystemAdminInterface) ||
     hasAnyScreenViewAccess(screenAccess, ADMIN_TOGGLE_NAV_TO_SCREEN_KEYS.org_tickets);
   const canOpenMyTickets =
+    isAdminCustomerMyViewMode ||
     isSystemAdminInterface ||
     canDoAction(actionAccess, "tickets.list_my", false) ||
     canViewCustomerTickets ||
     hasScreenViewAccess(screenAccess, "agent_my_tickets");
   const canOpenRaiseTicket =
+    isAdminCustomerMyViewMode ||
     isSystemAdminInterface ||
     canDoAction(actionAccess, "tickets.create", false) ||
     canViewCustomerNavKey("cust_raise_ticket", screenAccess);
@@ -841,6 +866,7 @@ export default function App() {
     (!isPrimaryCustomerRole &&
       (canDoAction(actionAccess, "sla.policies.manage", false) || hasScreenViewAccess(screenAccess, "sla_policies")));
   const isCustomerExperience =
+    isAdminCustomerMyViewMode ||
     isPrimaryCustomerRole ||
     (hasCustomerScopedAccess &&
       !canOpenTicketList &&
@@ -864,11 +890,12 @@ export default function App() {
       : isOrgAdminShell
         ? "org_admin"
         : "agent";
+  const navRoleKind: EtsAppRoleKind = isAdminCustomerMyViewMode ? "customer" : shellRoleKind;
   const roleSidebarItems = getEtsSidebarItemsForRole(shellRoleKind);
 
   const resolveTicketDestinationNav = (): string => {
     if (canOpenTicketList) return isSystemAdminInterface ? "sys_tickets" : "org_tickets";
-    if (canOpenMyTickets) return canViewCustomerTickets ? "cust_my_tickets" : "agent_my_tickets";
+    if (canOpenMyTickets) return isAdminCustomerMyViewMode || canViewCustomerTickets ? "cust_my_tickets" : "agent_my_tickets";
     if (canOpenRaiseTicket) return "cust_raise_ticket";
     return defaultDashboardNavKey(shellRoleKind);
   };
@@ -889,7 +916,7 @@ export default function App() {
       return;
     }
     if (canOpenMyTickets) {
-      setActiveNav(canViewCustomerTickets ? "cust_my_tickets" : "agent_my_tickets");
+      setActiveNav(isAdminCustomerMyViewMode || canViewCustomerTickets ? "cust_my_tickets" : "agent_my_tickets");
     }
   };
 
@@ -921,8 +948,8 @@ export default function App() {
     }
   };
 
-  const shellRoleKindRef = useRef(shellRoleKind);
-  shellRoleKindRef.current = shellRoleKind;
+  const shellRoleKindRef = useRef(navRoleKind);
+  shellRoleKindRef.current = navRoleKind;
 
   const adminSidebarFilterMode = isSystemAdminInterface
     ? "showAllWhenNoPermissions"
@@ -952,14 +979,29 @@ export default function App() {
       adminSidebarFilterMode,
     ]
   );
+  const customerSidebarItems = useMemo(
+    () => getEtsSidebarItemsForRole("customer"),
+    []
+  );
+  const customerMyViewItemsForAdminToggle = useMemo(() => {
+    if (shellRoleKind === "org_admin") {
+      // For org admin, My View should expose customer screens.
+      return customerSidebarItems;
+    }
+    return filterSidebarByNavAccess(customerSidebarItems, (navKey) =>
+      canViewCustomerNavKey(navKey, screenAccess)
+    );
+  }, [shellRoleKind, customerSidebarItems, screenAccess]);
   const splitSidebarEligible =
-    !isSystemAdminInterface &&
-    shellRoleKind !== "org_admin" &&
-    (shellRoleKind === "customer" ? hasCustomerScopedAccess : adminToggleItems.length > 0);
+    shellRoleKind === "org_admin" ||
+    (shellRoleKind === "customer"
+      ? hasCustomerScopedAccess
+      : shellRoleKind !== "system_admin" && adminToggleItems.length > 0);
   const showDashboardViewToggle = splitSidebarEligible;
   const forceTeamDashboardView =
-    isSystemAdminInterface ||
-    (canOpenTicketList && shellRoleKind !== "agent" && shellRoleKind !== "customer");
+    !splitSidebarEligible &&
+    (isSystemAdminInterface ||
+      (canOpenTicketList && shellRoleKind !== "agent" && shellRoleKind !== "customer"));
   const dashboardViewMode = forceTeamDashboardView ? "team" : splitSidebarEligible ? viewMode : "my_view";
 
   const canRenderSystemAdminRoute = useCallback(
@@ -993,13 +1035,22 @@ export default function App() {
 
   /** Keys allowed in “My view” for the current shell (customer + agent filtered; org unchanged). */
   const sidebarItemsForMyViewBucket = useMemo(() => {
+    if (shellRoleKind === "org_admin") {
+      return customerMyViewItemsForAdminToggle;
+    }
     if (isCustomerExperience) {
       return filterSidebarByNavAccess(shellBaseSidebarItems, (navKey) =>
         canViewCustomerNavKey(navKey, screenAccess)
       );
     }
     return shellBaseSidebarItems;
-  }, [isCustomerExperience, screenAccess, shellBaseSidebarItems]);
+  }, [
+    shellRoleKind,
+    customerMyViewItemsForAdminToggle,
+    isCustomerExperience,
+    screenAccess,
+    shellBaseSidebarItems,
+  ]);
 
   const sidebarItemsForShell = useMemo(() => {
     const splitSidebar = splitSidebarEligible;
@@ -1012,20 +1063,22 @@ export default function App() {
     if (!isSystemAdminInterface && !canOpenTicketList && canOpenMyTickets && dashboardViewMode === "team") {
       adminFiltered = removeSidebarKey(adminFiltered, "sys_tickets");
     }
-    if (isSystemAdminInterface) {
-      return adminFiltered;
-    }
-
-    if (shellRoleKind === "org_admin") {
-      return shellBaseSidebarItems;
-    }
-
-    /** For customer/agent/team_lead/custom shells, Admin toggle uses org-admin style menu. */
+    /** Admin/My View toggle menu: My View bucket + role-appropriate Admin bucket. */
     if (splitSidebar) {
       if (dashboardViewMode === "my_view") {
         return sidebarItemsForMyViewBucket;
       }
+      if (isSystemAdminInterface) {
+        return adminFiltered;
+      }
+      if (shellRoleKind === "org_admin") {
+        return shellBaseSidebarItems;
+      }
       return adminToggleItems;
+    }
+
+    if (isSystemAdminInterface) {
+      return adminFiltered;
     }
 
     let combined: SidebarItem[];
@@ -1072,10 +1125,20 @@ export default function App() {
     adminToggleItems,
   ]);
 
+  const headerSearchItems = useMemo(() => {
+    if (!splitSidebarEligible) {
+      return collectHeaderSearchItems(sidebarItemsForShell);
+    }
+    return collectHeaderSearchItems(sidebarItemsForMyViewBucket, adminToggleItems);
+  }, [splitSidebarEligible, sidebarItemsForShell, sidebarItemsForMyViewBucket, adminToggleItems]);
+
   useEffect(() => {
     if (!user || !permissionsLoaded) return;
     // Preserve explicit route refreshes (e.g. /admin/users-roles); only enforce view bucket on dashboard route.
     if (location.pathname !== "/dashboard") return;
+    // Do not interfere with explicit non-dashboard navigations that were just requested
+    // (e.g. dashboard CTA -> tickets) before `navigate()` effect commits the new pathname.
+    if (!isWorkspaceDashboardNav(activeNav)) return;
     const splitSidebar = splitSidebarEligible;
     if (!splitSidebar) return;
 
@@ -1170,7 +1233,6 @@ export default function App() {
   useEffect(() => {
     if (initialNavResolved) return;
     if (!user) return;
-    if (profileLoading) return;
     if (!activeOrgId) return;
 
     // On first render after login:
@@ -1188,7 +1250,6 @@ export default function App() {
   }, [
     initialNavResolved,
     user,
-    profileLoading,
     activeOrgId,
     isSystemAdminInterface,
     activeNav,
@@ -1249,10 +1310,10 @@ export default function App() {
 
   useEffect(() => {
     if (!user) return;
-    const next = navKeyFromPath(location.pathname, shellRoleKind);
+    const next = navKeyFromPath(location.pathname, navRoleKind);
     if (!next) return;
     setActiveNav((prev) => (prev === next ? prev : next));
-  }, [user, location.pathname, shellRoleKind]);
+  }, [user, location.pathname, navRoleKind]);
 
   useEffect(() => {
     if (!user) return;
@@ -1382,6 +1443,7 @@ export default function App() {
         sidebarOrgName={profile?.organization_name || ""}
         sidebarOrgLogoUrl={profile?.organization_logo ?? undefined}
         sidebarItems={noAccessAssigned ? [] : sidebarItemsForShell}
+        headerSearchItems={noAccessAssigned ? [] : headerSearchItems}
         activeNavKey={activeNav}
         onNavSelect={setActiveNav}
         showCreateTicketButton={showCreateTicketButtonInSidebar}
@@ -1404,11 +1466,7 @@ export default function App() {
             </div>
           }
         >
-          {profileLoading ? (
-            <div className="flex min-h-[70vh] w-full items-center justify-center text-sm text-muted-foreground">
-              <Loader label="Loading tenant..." size="sm" />
-            </div>
-          ) : profileError ? (
+          {profileError ? (
             <div className="max-w-2xl text-sm">
               <div className="text-red-300">{profileError}</div>
             </div>
@@ -1475,7 +1533,7 @@ export default function App() {
               <>
                 {isWorkspaceDashboardNav(activeNav) ? (
                   <TeamDashboardPage
-                    role={shellRoleKind}
+                    role={isAdminCustomerMyViewMode ? "customer" : shellRoleKind}
                     viewMode={dashboardViewMode}
                     dashboardNavKey={activeNav}
                     orgId={activeOrgId}

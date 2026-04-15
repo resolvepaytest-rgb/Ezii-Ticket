@@ -138,6 +138,31 @@
   .scrollbar-slim::-webkit-scrollbar-thumb:hover {
     background-color: hsl(var(--muted-foreground) / 0.55);
   }
+
+  /* Ultra-thin sidebar scrollbar */
+  .scrollbar-thinest {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
+    margin-right: -0.5rem;
+  }
+
+  .scrollbar-thinest::-webkit-scrollbar {
+    width: 2px;
+  }
+
+  .scrollbar-thinest::-webkit-scrollbar-track {
+    
+    background: transparent;
+  }
+
+  .scrollbar-thinest::-webkit-scrollbar-thumb {
+    border-radius: 9999px;
+    background-color: hsl(var(--muted-foreground) / 0.25);
+  }
+
+  .scrollbar-thinest::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--muted-foreground) / 0.4);
+  }
 }
 
 /* Smooth glass background */

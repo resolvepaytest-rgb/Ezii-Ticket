@@ -1,9 +1,11 @@
 import type { PropsWithChildren } from "react";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { CirclePlus } from "lucide-react";
 import { Header } from "./Header";
 import type { HeaderUserInfo, HeaderVariant } from "./Header";
 import { Sidebar, type SidebarItem } from "./Sidebar";
+import { collectHeaderSearchItems, type HeaderSearchItem } from "./headerSearch";
 
 type AppShellProps = PropsWithChildren<{
   productName: string;
@@ -26,6 +28,7 @@ type AppShellProps = PropsWithChildren<{
   notificationUnreadCount?: number;
   onHeaderSupportClick?: () => void;
   onHeaderSettingsClick?: () => void;
+  headerSearchItems?: HeaderSearchItem[];
   className?: string;
 }>;
 
@@ -50,11 +53,14 @@ export function AppShell({
   notificationUnreadCount = 0,
   onHeaderSupportClick,
   onHeaderSettingsClick,
+  headerSearchItems,
   className,
   children,
 }: AppShellProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userPanelOpen, setUserPanelOpen] = useState(false);
+  const resolvedHeaderSearchItems =
+    headerSearchItems ?? collectHeaderSearchItems(sidebarItems ?? []);
 
   const initialText = (() => {
     const name = (userInfo?.name || userLabel || "U").trim();
@@ -97,6 +103,8 @@ export function AppShell({
         notificationUnreadCount={notificationUnreadCount}
         onSupportClick={onHeaderSupportClick}
         onSettingsClick={onHeaderSettingsClick}
+        searchItems={resolvedHeaderSearchItems}
+        onSearchSelect={onNavSelect}
       />
 
       <div className="flex min-h-0 w-full flex-1 overflow-hidden">
@@ -109,7 +117,7 @@ export function AppShell({
               aria-label="Close menu overlay"
               onClick={() => setMobileOpen(false)}
             />
-            <div className="absolute left-0 top-0 h-full w-[18rem]">
+            <div className="absolute left-0 top-0 h-full w-[16rem]">
               <Sidebar
                 orgName={sidebarOrgName}
                 orgSubtitle={sidebarOrgSubtitle}
@@ -120,8 +128,6 @@ export function AppShell({
                   onNavSelect?.(k);
                   setMobileOpen(false);
                 }}
-                showCreateTicketButton={showCreateTicketButton}
-                onCreateTicketClick={onCreateTicketClick}
                 showViewModeToggle={showViewModeToggle}
                 viewMode={viewMode}
                 onViewModeChange={onViewModeChange}
@@ -138,8 +144,6 @@ export function AppShell({
           items={sidebarItems}
           activeKey={activeNavKey}
           onSelect={onNavSelect}
-          showCreateTicketButton={showCreateTicketButton}
-          onCreateTicketClick={onCreateTicketClick}
           showViewModeToggle={showViewModeToggle}
           viewMode={viewMode}
           onViewModeChange={onViewModeChange}
@@ -149,6 +153,17 @@ export function AppShell({
           {children}
         </main>
       </div>
+
+      {showCreateTicketButton ? (
+        <button
+          type="button"
+          onClick={onCreateTicketClick}
+          className="fixed bottom-5 right-4 z-30 inline-flex items-center gap-2 rounded-xl bg-[hsl(var(--brand))] px-3 py-2 text-sm font-semibold text-white shadow-lg transition hover:opacity-95 md:bottom-6 md:right-6"
+        >
+          <CirclePlus className="h-4 w-4" />
+          <span>Create Ticket</span>
+        </button>
+      ) : null}
 
       {userPanelOpen ? (
         <>
