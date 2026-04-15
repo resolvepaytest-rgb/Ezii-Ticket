@@ -1,5 +1,10 @@
 import { AppToaster } from "@components/common/AppToaster";
 import { Loader } from "@components/common/Loader";
+import {
+  SessionBootstrapScreen,
+  type SessionBootstrapStage,
+} from "@components/common/SessionBootstrapScreen";
+import { EziiTicketLandingPage } from "@pages/public/EziiTicketLandingPage";
 import { NavPlaceholder } from "@components/common/NavPlaceholder";
 import { ThemeProvider } from "@components/common/ThemeProvider";
 import { loginByLink, loginByToken, authMe, getAuthMePermissions } from "@api/authApi";
@@ -528,6 +533,8 @@ export default function App() {
   const setUser = useAuthStore((s) => s.setUser);
   const logout = useAuthStore((s) => s.logout);
   const [authLoading, setAuthLoading] = useState(true);
+  /** Shown while `authLoading`: brief splash, then token/session check via `authMe`. */
+  const [authGateStep, setAuthGateStep] = useState<"splash" | "checking">("splash");
 
   const [profile, setProfile] = useState<ExternalUserProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -625,6 +632,11 @@ export default function App() {
     // Load user claims (if token exists)
     void (async () => {
       setAuthLoading(true);
+      setAuthGateStep("splash");
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 120);
+      });
+      setAuthGateStep("checking");
       try {
         const me = await authMe();
         const claims = me.user as JwtUserClaims;
@@ -741,6 +753,8 @@ export default function App() {
     setNotificationUnreadCount(0);
     notificationRequestIdRef.current += 1;
     logout();
+    /** Public landing lives at `/`; do not leave the authenticated shell path in the bar after sign-out. */
+    navigate("/", { replace: true });
   };
 
   const hasScreenAccessView = Boolean(
@@ -1242,22 +1256,54 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
+    if (!user) return;
     const targetPath = pathFromNavKey(activeNav);
     if (targetPath !== location.pathname) {
       navigate(targetPath);
     }
-  }, [activeNav, location.pathname, navigate]);
+  }, [activeNav, location.pathname, navigate, user]);
+
+  /** `/dashboard` is only for signed-in shell; normalize to `/` when session is gone (e.g. expiry, cleared token). */
+  useEffect(() => {
+    if (user) return;
+    if (location.pathname !== "/dashboard") return;
+    navigate("/", { replace: true });
+  }, [user, location.pathname, navigate]);
+
+  const sessionBootstrapStage: SessionBootstrapStage = authLoading
+    ? authGateStep === "splash"
+      ? "loading"
+      : "checking_credentials"
+    : user && !permissionsLoaded
+      ? "verifying_credentials"
+      : "loading";
 
   if (authLoading || (user && !permissionsLoaded)) {
     return (
       <ThemeProvider>
         <AppToaster />
-        <Loader label="Loading…" className="min-h-svh p-6" />
+        <SessionBootstrapScreen stage={sessionBootstrapStage} productTitle="Ezii Ticketing" />
       </ThemeProvider>
     );
   }
 
   if (!user) {
+    const showPublicLanding = location.pathname === "/";
+    if (showPublicLanding) {
+      return (
+        <ThemeProvider>
+          <AppToaster />
+          <EziiTicketLandingPage
+            onAccessClick={() =>
+              toast.message("Sign in", {
+                description:
+                  "Use the secure access link from your administrator, or open your organization’s Ezii Ticket sign-in page.",
+              })
+            }
+          />
+        </ThemeProvider>
+      );
+    }
     return (
       <ThemeProvider>
         <AppToaster />
