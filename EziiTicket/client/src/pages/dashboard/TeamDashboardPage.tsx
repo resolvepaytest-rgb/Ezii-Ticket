@@ -1270,22 +1270,30 @@ export function TeamDashboardPage({
         </div>
 
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <GlassCard className="rounded-lg border border-blue-100 p-2.5">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">My Open Tickets</div>
-            <div className="mt-1 text-[26px] font-bold leading-none tabular-nums text-blue-700">{String(openTicketDisplay).padStart(2, "0")}</div>
-            <div className="mt-1.5 text-[10px] font-medium text-red-500">+2</div>
+          <GlassCard className="rounded-lg p-2.5">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">My Open Tickets</div>
+            <div className="mt-1 text-[26px] font-bold leading-none tabular-nums text-[hsl(var(--brand))] dark:text-[hsl(var(--brand-2))]">
+              {String(openTicketDisplay).padStart(2, "0")}
+            </div>
+            <div className="mt-1.5 text-[10px] font-medium text-red-600 dark:text-red-400">+2</div>
           </GlassCard>
-          <GlassCard className="rounded-lg border border-blue-100 p-2.5">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">Tickets Due Today</div>
-            <div className="mt-1 text-[26px] font-bold leading-none tabular-nums text-blue-700">{String(kpis.dueTodayCount).padStart(2, "0")}</div>
-            <div className="mt-1.5 text-[10px] font-semibold text-slate-600">Targets Met</div>
+          <GlassCard className="rounded-lg p-2.5">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Tickets Due Today</div>
+            <div className="mt-1 text-[26px] font-bold leading-none tabular-nums text-[hsl(var(--brand))] dark:text-[hsl(var(--brand-2))]">
+              {String(kpis.dueTodayCount).padStart(2, "0")}
+            </div>
+            <div className="mt-1.5 text-[10px] font-semibold text-muted-foreground">Targets Met</div>
           </GlassCard>
-          <GlassCard className="rounded-lg border border-red-100 p-2.5">
-            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500">SLA Breach Warning</div>
-            <div className="mt-1 text-[26px] font-bold leading-none tabular-nums text-red-600">{String(criticalDisplay).padStart(2, "0")}</div>
-            <div className="mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-red-500">Critical</div>
+          <GlassCard className="rounded-lg border border-red-300/70 p-2.5 dark:border-red-800/45">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">SLA Breach Warning</div>
+            <div className="mt-1 text-[26px] font-bold leading-none tabular-nums text-red-600 dark:text-red-400">
+              {String(criticalDisplay).padStart(2, "0")}
+            </div>
+            <div className="mt-1.5 text-[10px] font-semibold uppercase tracking-wide text-red-600 dark:text-red-400">
+              Critical
+            </div>
           </GlassCard>
-          <GlassCard className="rounded-lg border border-blue-700 !bg-[hsl(var(--brand))] p-2.5 !text-white dark:!bg-[hsl(var(--brand))]">
+          <GlassCard className="rounded-lg !border-[hsl(var(--brand)/0.45)] !bg-[hsl(var(--brand))] !backdrop-blur-none p-2.5 !text-white dark:!border-[hsl(var(--brand)/0.35)] dark:!bg-[hsl(var(--brand)/0.95)]">
             <div className="text-[11px] font-bold uppercase tracking-wide !text-white/85">Today's Resolutions</div>
             <div className="mt-1 text-[26px] font-bold leading-none tabular-nums !text-white">{String(kpis.resolvedTodayCount).padStart(2, "0")}</div>
             <div className="mt-1.5 text-[10px] font-semibold !text-white/95">{kpis.efficiency}% Efficiency</div>
