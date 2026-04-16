@@ -88,15 +88,21 @@ function priorityRank(p: TicketRow["priority"]) {
   return 4;
 }
 
-function subjectLaneSubtitle(row: TicketRow): string {
-  const subj = row.subject.toLowerCase();
-  for (const [lane, keys] of Object.entries(LANE_KEYWORDS) as [Exclude<LaneKey, "all">, string[]][]) {
-    if (keys.some((k) => subj.includes(k))) return `${lane.replace("_", " ").toUpperCase()} • QUEUE`;
-  }
-  return `${row.priority} • ${String(row.status).toUpperCase()}`;
+function statusBadgeClass(status: string) {
+  const s = status.toLowerCase();
+  if (s === "new") return "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/35 dark:text-blue-200";
+  if (s === "open") return "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/50 dark:bg-sky-950/35 dark:text-sky-200";
+  if (s === "pending") return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/50 dark:bg-amber-950/35 dark:text-amber-200";
+  if (s === "escalated") return "border-red-200 bg-red-50 text-red-700 dark:border-red-900/50 dark:bg-red-950/35 dark:text-red-200";
+  if (s === "reopened") return "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-900/50 dark:bg-violet-950/35 dark:text-violet-200";
+  return "border-border bg-muted text-foreground";
 }
 
-export function AgentTeamQueuePage() {
+type AgentTeamQueuePageProps = {
+  onOpenTicket?: (ticketId: number) => void;
+};
+
+export function AgentTeamQueuePage({ onOpenTicket }: AgentTeamQueuePageProps) {
   const authUser = useAuthStore((s) => s.user);
   const myUserId = Number(authUser?.user_id ?? 0);
   const [rows, setRows] = useState<TicketRow[]>([]);
@@ -104,7 +110,7 @@ export function AgentTeamQueuePage() {
   const [detail, setDetail] = useState<TicketDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [status, setStatus] = useState("open");
+  const [status, setStatus] = useState("all");
   const [priorityApi, setPriorityApi] = useState<"" | "P1" | "P2" | "P3" | "P4">("");
   const [search, setSearch] = useState("");
   const [lane, setLane] = useState<LaneKey>("all");
@@ -126,7 +132,7 @@ export function AgentTeamQueuePage() {
     setLoading(true);
     try {
       const data = await listTickets({
-        status,
+        status: status === "all" ? undefined : status,
         priority: priorityApi || undefined,
         q: searchRef.current.trim() || undefined,
         unassigned_only: true,
@@ -257,6 +263,7 @@ export function AgentTeamQueuePage() {
         queue_id: selected?.queue_id ?? null,
       });
       toast.success("Ticket claimed by you");
+      onOpenTicket?.(selectedId);
       await loadRows();
       setSelectedId(null);
     } catch (err) {
@@ -279,6 +286,7 @@ export function AgentTeamQueuePage() {
         queue_id: row.queue_id ?? null,
       });
       toast.success(`${row.ticket_code} claimed`);
+      onOpenTicket?.(row.id);
       await loadRows();
       if (selectedId === row.id) setSelectedId(null);
     } catch (err) {
@@ -354,6 +362,7 @@ export function AgentTeamQueuePage() {
             onChange={(e) => setStatus(e.target.value)}
             className="h-7 rounded-md border border-border bg-background px-2 text-[10px] font-medium text-foreground"
           >
+            <option value="all">All</option>
             <option value="open">Open</option>
             <option value="new">New</option>
             <option value="pending">Pending</option>
@@ -512,8 +521,23 @@ export function AgentTeamQueuePage() {
                         </td>
                         <td className="max-w-[240px] px-2 py-1.5 align-middle">
                           <div className={cn("line-clamp-1 font-semibold leading-tight", HEADING)}>{row.subject}</div>
-                          <div className="mt-0.5 line-clamp-1 text-[8px] font-semibold uppercase tracking-wide text-muted-foreground">
-                            {subjectLaneSubtitle(row)}
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                            <span
+                              className={cn(
+                                "inline-flex rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide",
+                                priorityPill(row.priority).className
+                              )}
+                            >
+                              {row.priority}
+                            </span>
+                            <span
+                              className={cn(
+                                "inline-flex rounded-full border px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-wide",
+                                statusBadgeClass(String(row.status))
+                              )}
+                            >
+                              {String(row.status)}
+                            </span>
                           </div>
                         </td>
                         <td className="px-2 py-1.5 align-middle">

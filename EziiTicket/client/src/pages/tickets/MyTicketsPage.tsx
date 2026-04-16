@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
 import {
@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import type { ActionAccessMap } from "@/config/permissionKeys";
 import {
   ArrowUpCircle,
+  ChevronDown,
+  ChevronUp,
   Check,
   ChevronLeft,
   ChevronRight,
@@ -85,6 +87,34 @@ function formatStatusLabel(status: string) {
     reopened: "OPEN",
   };
   return map[s] ?? status.replace(/_/g, " ").toUpperCase();
+}
+
+function formatMetadataLabel(key: string) {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function formatMetadataValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) return value.join(", ");
+  if (typeof value === "object") return "Updated";
+  return String(value);
+}
+
+function activityMetadataEntries(metadata: Record<string, unknown> | null | undefined) {
+  if (!metadata || typeof metadata !== "object") return [];
+  return Object.entries(metadata)
+    .map(([key, raw]) => {
+      const value = formatMetadataValue(raw);
+      return {
+        key,
+        label: formatMetadataLabel(key),
+        value,
+      };
+    })
+    .filter((entry) => entry.value.trim().length > 0);
 }
 
 function initialsFromSubject(subject: string) {
@@ -318,6 +348,7 @@ export function MyTicketsPage({
   const [sending, setSending] = useState(false);
   const [statusActionBusy, setStatusActionBusy] = useState(false);
   const [requestEscalationBusy, setRequestEscalationBusy] = useState(false);
+  const [conversationExpanded, setConversationExpanded] = useState(false);
   const [filters, setFilters] = useState<FilterState>({
     productId: "all",
     status: "all",
@@ -328,6 +359,7 @@ export function MyTicketsPage({
   const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>([]);
   const [cannedSearch, setCannedSearch] = useState("");
   const [actionAccess, setActionAccess] = useState<ActionAccessMap | null>(null);
+  const detailSectionRef = useRef<HTMLDivElement | null>(null);
   const hasExplicitActionPermissions = Boolean(actionAccess && Object.keys(actionAccess).length > 0);
   const canReply = canDoAction(actionAccess, "tickets.reply", false);
   const canStatusChange = canDoAction(actionAccess, "tickets.status_change", false);
@@ -348,7 +380,7 @@ export function MyTicketsPage({
         setRows(data);
         setSelectedId((prev) => {
           if (prev && data.some((r) => r.id === prev)) return prev;
-          return data[0]?.id ?? null;
+          return null;
         });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Failed to load tickets");
@@ -472,6 +504,16 @@ export function MyTicketsPage({
       void getTicket(selectedId).then(setDetail).catch(() => null);
     }, 10000);
     return () => window.clearInterval(timer);
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    // Wait a tick so the detail card is in DOM before scrolling.
+    const id = window.setTimeout(() => {
+      detailSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+   
+    }, 0);
+    return () => window.clearTimeout(id);
   }, [selectedId]);
 
   useEffect(() => {
@@ -1072,16 +1114,49 @@ export function MyTicketsPage({
       </GlassCard>
 
       {selectedId ? (
-        <GlassCard className="mt-5 border-black/5 bg-white/90 p-4 dark:border-white/10 dark:bg-white/[0.06]">
-          {detailLoading ? (
-            <Loader label="Loading ticket detail..." />
-          ) : !detail ? (
-            <div className="text-xs text-muted-foreground">Ticket detail unavailable.</div>
-          ) : (
-            <div className="space-y-3">
-              <div>
-                <div className="text-[11px] font-semibold text-sky-600 dark:text-sky-400">{detail.ticket_code}</div>
-                <h3 className="mt-0.5 text-base font-semibold text-[#1A202C] dark:text-foreground">{detail.subject}</h3>
+        <div ref={detailSectionRef}>
+          <GlassCard className="mt-5 border-black/5 bg-white/90 p-4 dark:border-white/10 dark:bg-white/[0.06]">
+            {detailLoading ? (
+              <Loader label="Loading ticket detail..." />
+            ) : !detail ? (
+              <div className="text-xs text-muted-foreground">Ticket detail unavailable.</div>
+            ) : (
+              <div className="space-y-3">
+              <div className="border-b border-black/10 pb-2 dark:border-white/10">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[11px] font-semibold text-sky-600 dark:text-sky-400">{detail.ticket_code}</div>
+                    <h3 className="mt-0.5 text-base font-semibold text-[#1A202C] dark:text-foreground">{detail.subject}</h3>
+                  </div>
+                  {canStatusChange || canEscalate ? (
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        type="button"
+                        disabled={!canStatusChange || statusActionBusy || detail.status.toLowerCase() === "pending"}
+                        onClick={() => void setPending()}
+                        className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
+                      >
+                        Set Pending
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canStatusChange || statusActionBusy || detail.status.toLowerCase() === "resolved"}
+                        onClick={() => void setResolved()}
+                        className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
+                      >
+                        Set Resolved
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!canEscalate || statusActionBusy}
+                        onClick={() => void escalate()}
+                        className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
+                      >
+                        Escalate
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
                 {!canWriteInternal && detail.description ? (
                   <p className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-slate-600 dark:text-slate-300">
                     {detail.description}
@@ -1104,26 +1179,82 @@ export function MyTicketsPage({
               </div>
 
               {canWriteInternal ? (
-                <div className="rounded-xl border border-black/10 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                  <div className="mb-1.5 text-xs font-semibold text-[#1A202C] dark:text-foreground">
-                    Customer context
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  <div className="rounded-xl border border-black/10 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                    <div className="mb-1.5 text-xs font-semibold text-[#1A202C] dark:text-foreground">
+                      Customer context
+                    </div>
+                    <div className="grid gap-2 text-[11px] text-slate-700 dark:text-slate-200 sm:grid-cols-2">
+                      <div>
+                        <span className="font-semibold">Reporter:</span> {detail.reporter_name ?? detail.reporter_user_id}
+                      </div>
+                      <div>
+                        <span className="font-semibold">Organisation:</span>{" "}
+                        {detail.organisation_name?.trim() || `Org #${detail.organisation_id}`}
+                      </div>
+                      <div>
+                        <span className="font-semibold">Product:</span> {productMap.get(detail.product_id) ?? detail.product_id}
+                      </div>
+                      <div>
+                        <span className="font-semibold">Subscription:</span> Active
+                      </div>
+                      <div className="sm:col-span-2">
+                        <span className="font-semibold">Previous tickets:</span> {Math.max(0, reporterPreviousCount - 1)}
+                      </div>
+                    </div>
                   </div>
-                  <div className="grid gap-2 text-[11px] text-slate-700 dark:text-slate-200 sm:grid-cols-2">
-                    <div>
-                      <span className="font-semibold">Reporter:</span> {detail.reporter_name ?? detail.reporter_user_id}
-                    </div>
-                    <div>
-                      <span className="font-semibold">Organisation:</span> {detail.organisation_id}
-                    </div>
-                    <div>
-                      <span className="font-semibold">Product:</span> {productMap.get(detail.product_id) ?? detail.product_id}
-                    </div>
-                    <div>
-                      <span className="font-semibold">Subscription:</span> Active
-                    </div>
-                    <div className="sm:col-span-2">
-                      <span className="font-semibold">Previous tickets:</span> {Math.max(0, reporterPreviousCount - 1)}
-                    </div>
+                  <div className="rounded-xl border border-black/10 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                    <button
+                      type="button"
+                      onClick={() => setConversationExpanded((v) => !v)}
+                      className="flex w-full items-center justify-between text-left"
+                    >
+                      <div className="text-xs font-semibold text-[#1A202C] dark:text-foreground">Conversation</div>
+                      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                        {conversationExpanded ? "Collapse" : "Expand"}
+                        {conversationExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                      </span>
+                    </button>
+                    {conversationExpanded ? (
+                      <div className="mt-2 max-h-[100px] space-y-3 overflow-y-auto pr-1">
+                        {detail.messages.map((m) => {
+                          const isMine = Number(m.author_user_id ?? 0) === currentUserId;
+                          const senderLabel =
+                            m.author_name?.trim() ||
+                            (isMine
+                              ? "You"
+                              : m.author_type === "agent"
+                                ? "Support Agent"
+                                : m.author_type === "customer"
+                                  ? "Customer"
+                                  : "System");
+                          return (
+                            <div key={m.id} className={cn("flex w-full", isMine ? "justify-end" : "justify-start")}>
+                              <div
+                                className={cn(
+                                  "max-w-[min(100%,420px)] rounded-2xl px-3 py-2 text-xs shadow-sm",
+                                  isMine
+                                    ? "bg-sky-600 text-white"
+                                    : m.is_internal
+                                      ? "border border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                                      : "border border-black/10 bg-white text-[#1A202C] dark:border-white/10 dark:bg-zinc-900/90 dark:text-foreground"
+                                )}
+                              >
+                                <div className={cn("mb-1 text-[10px] font-semibold", isMine ? "text-sky-100" : "text-muted-foreground")}>
+                                  {senderLabel} · {new Date(m.created_at).toLocaleString()}
+                                  {m.is_internal ? (
+                                    <span className="ml-1 rounded bg-amber-600/20 px-1 py-0.5 text-[9px] font-semibold text-amber-900 dark:text-amber-100">
+                                      Internal
+                                    </span>
+                                  ) : null}
+                                </div>
+                                <div className="whitespace-pre-wrap leading-relaxed">{m.body}</div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
@@ -1131,34 +1262,6 @@ export function MyTicketsPage({
               {!canWriteInternal ? <CustomerStatusTimeline status={detail.status} /> : null}
 
               <div className="flex flex-wrap items-center gap-1.5">
-                {canStatusChange || canEscalate ? (
-                  <>
-                    <button
-                      type="button"
-                      disabled={!canStatusChange || statusActionBusy || detail.status.toLowerCase() === "pending"}
-                      onClick={() => void setPending()}
-                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
-                    >
-                      Set Pending
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canStatusChange || statusActionBusy || detail.status.toLowerCase() === "resolved"}
-                      onClick={() => void setResolved()}
-                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
-                    >
-                      Set Resolved
-                    </button>
-                    <button
-                      type="button"
-                      disabled={!canEscalate || statusActionBusy}
-                      onClick={() => void escalate()}
-                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
-                    >
-                      Escalate
-                    </button>
-                  </>
-                ) : null}
                 {!canWriteInternal && detail.can_request_escalation && canRequestEscalation ? (
                   <button
                     type="button"
@@ -1191,161 +1294,158 @@ export function MyTicketsPage({
 
               {!canWriteInternal ? (
                 <div className="rounded-xl border border-black/10 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                  <div className="mb-1.5 text-xs font-semibold text-[#1A202C] dark:text-foreground">Conversation</div>
-                  <div className="max-h-[320px] space-y-3 overflow-y-auto pr-1">
-                    {detail.messages.map((m) => {
-                      const isCust = m.author_type === "customer";
-                      const isAgent = m.author_type === "agent";
-                      return (
-                        <div
-                          key={m.id}
-                          className={cn(
-                            "flex w-full",
-                            isCust ? "justify-end" : isAgent ? "justify-start" : "justify-center"
-                          )}
-                        >
-                          <div
-                            className={cn(
-                              "max-w-[min(100%,380px)] rounded-2xl px-3 py-2 text-xs shadow-sm",
-                              isCust
-                                ? "bg-sky-600 text-white"
-                                : isAgent
-                                  ? "border border-black/10 bg-white text-[#1A202C] dark:border-white/10 dark:bg-zinc-900/90 dark:text-foreground"
-                                  : "border border-black/10 bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                            )}
-                          >
+                  <button
+                    type="button"
+                    onClick={() => setConversationExpanded((v) => !v)}
+                    className="flex w-full items-center justify-between text-left"
+                  >
+                    <div className="text-xs font-semibold text-[#1A202C] dark:text-foreground">Conversation</div>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+                      {conversationExpanded ? "Collapse" : "Expand"}
+                      {conversationExpanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                    </span>
+                  </button>
+                  {conversationExpanded ? (
+                    <div className="mt-2 max-h-[100px] space-y-3 overflow-y-auto pr-1">
+                      {detail.messages.map((m) => {
+                        const isMine = Number(m.author_user_id ?? 0) === currentUserId;
+                        const senderLabel =
+                          m.author_name?.trim() ||
+                          (isMine
+                            ? "You"
+                            : m.author_type === "agent"
+                              ? "Support Agent"
+                              : m.author_type === "customer"
+                                ? "Customer"
+                                : "System");
+                        return (
+                          <div key={m.id} className={cn("flex w-full", isMine ? "justify-end" : "justify-start")}>
                             <div
                               className={cn(
-                                "mb-1 text-[10px] font-semibold",
-                                isCust ? "text-sky-100" : "text-muted-foreground"
+                                "max-w-[min(100%,420px)] rounded-2xl px-3 py-2 text-xs shadow-sm",
+                                isMine
+                                  ? "bg-sky-600 text-white"
+                                  : m.is_internal
+                                    ? "border border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100"
+                                    : "border border-black/10 bg-white text-[#1A202C] dark:border-white/10 dark:bg-zinc-900/90 dark:text-foreground"
                               )}
                             >
-                              {isCust ? "You" : isAgent ? "Support" : "System"} ·{" "}
-                              {new Date(m.created_at).toLocaleString()}
+                              <div className={cn("mb-1 text-[10px] font-semibold", isMine ? "text-sky-100" : "text-muted-foreground")}>
+                                {senderLabel} · {new Date(m.created_at).toLocaleString()}
+                                {m.is_internal ? (
+                                  <span className="ml-1 rounded bg-amber-600/20 px-1 py-0.5 text-[9px] font-semibold text-amber-900 dark:text-amber-100">
+                                    Internal
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className="whitespace-pre-wrap leading-relaxed">{m.body}</div>
                             </div>
-                            <div className="whitespace-pre-wrap leading-relaxed">{m.body}</div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  ) : null}
                 </div>
-              ) : (
+              ) : null}
+
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                 <div className="rounded-xl border border-black/10 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                  <div className="mb-1.5 text-xs font-semibold text-[#1A202C] dark:text-foreground">Conversation</div>
-                  <div className="max-h-[280px] space-y-2 overflow-y-auto">
-                    {detail.messages.map((m) => (
-                      <div
-                        key={m.id}
-                        className={cn(
-                          "rounded-lg border p-1.5 text-xs dark:border-white/10",
-                          m.is_internal
-                            ? "border-amber-500/40 bg-amber-500/10"
-                            : "border-black/10 bg-white dark:bg-zinc-900/50"
-                        )}
-                      >
-                        <div className="mb-0.5 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-                          <span>
-                            {m.author_type} • {new Date(m.created_at).toLocaleString()}
-                          </span>
-                          {m.is_internal ? (
-                            <span className="rounded bg-amber-600/20 px-1 py-0.5 text-[9px] font-semibold text-amber-900 dark:text-amber-100">
-                              Internal
-                            </span>
-                          ) : null}
-                        </div>
-                        <div>{m.body}</div>
-                      </div>
-                    ))}
+                  <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
+                    <div className="text-xs font-semibold text-[#1A202C] dark:text-foreground">Attachments</div>
+                    <label
+                      className={cn(
+                        "text-[11px] font-semibold text-sky-600 dark:text-sky-400",
+                        uploadBusy || ["closed", "cancelled"].includes(detail.status.toLowerCase())
+                          ? "cursor-not-allowed opacity-50"
+                          : "cursor-pointer"
+                      )}
+                    >
+                      <input
+                        type="file"
+                        className="sr-only"
+                        disabled={uploadBusy || ["closed", "cancelled"].includes(detail.status.toLowerCase())}
+                        onChange={(e) => void onPickUpload(e)}
+                      />
+                      {uploadBusy ? "Uploading…" : "+ Upload file"}
+                    </label>
                   </div>
-                </div>
-              )}
-
-              <div className="rounded-xl border border-black/10 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                <div className="mb-1.5 flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs font-semibold text-[#1A202C] dark:text-foreground">Attachments</div>
-                  <label
-                    className={cn(
-                      "text-[11px] font-semibold text-sky-600 dark:text-sky-400",
-                      uploadBusy || ["closed", "cancelled"].includes(detail.status.toLowerCase())
-                        ? "cursor-not-allowed opacity-50"
-                        : "cursor-pointer"
-                    )}
-                  >
-                    <input
-                      type="file"
-                      className="sr-only"
-                      disabled={uploadBusy || ["closed", "cancelled"].includes(detail.status.toLowerCase())}
-                      onChange={(e) => void onPickUpload(e)}
-                    />
-                    {uploadBusy ? "Uploading…" : "+ Upload file"}
-                  </label>
-                </div>
-                <p className="mb-2 text-[10px] text-muted-foreground">
-                  {canWriteInternal
-                    ? "Download any file attached to this ticket."
-                    : "Your uploads and files shared by support are listed below."}
-                </p>
-                {(detail.attachments ?? []).length === 0 ? (
-                  <div className="text-[11px] text-muted-foreground">No attachments yet.</div>
-                ) : (
-                  <ul className="space-y-1.5 text-xs">
-                    {(detail.attachments ?? []).map((a) => (
-                      <li key={a.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
-                        <div className="min-w-0">
-                          <span className="block truncate font-medium">{a.file_name}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            From{" "}
-                            {attachmentSourceLabel(a.uploader_user_id, currentUserId, detail.assignee_user_id ?? null)}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          className="shrink-0 text-[11px] font-semibold text-sky-600 underline dark:text-sky-400"
-                          onClick={() => void downloadAttachment(a.id, a.file_name)}
-                        >
-                          Download
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div className="rounded-xl border border-black/10 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
-                <div className="mb-1.5 text-xs font-semibold text-[#1A202C] dark:text-foreground">Activity</div>
-                <div className="max-h-[200px] space-y-2 overflow-y-auto">
-                  {detail.events.length === 0 ? (
-                    <div className="text-[11px] text-muted-foreground">No activity yet.</div>
+                  <p className="mb-2 text-[10px] text-muted-foreground">
+                    {canWriteInternal
+                      ? "Download any file attached to this ticket."
+                      : "Your uploads and files shared by support are listed below."}
+                  </p>
+                  {(detail.attachments ?? []).length === 0 ? (
+                    <div className="text-[11px] text-muted-foreground">No attachments yet.</div>
                   ) : (
-                    detail.events
-                      .slice()
-                      .reverse()
-                      .slice(0, canWriteInternal ? 20 : 15)
-                      .map((ev) => (
-                        <div
-                          key={ev.id}
-                          className={cn(
-                            "rounded-lg border border-black/10 p-1.5 text-[11px] dark:border-white/10",
-                            canWriteInternal ? "bg-white dark:bg-zinc-900/40" : "bg-white/80 dark:bg-zinc-900/30"
-                          )}
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span className="font-semibold capitalize">
-                              {ev.event_type.replace(/_/g, " ")}
-                            </span>
+                    <ul className="space-y-1.5 text-xs">
+                      {(detail.attachments ?? []).map((a) => (
+                        <li key={a.id} className="flex flex-col gap-0.5 sm:flex-row sm:items-center sm:justify-between sm:gap-2">
+                          <div className="min-w-0">
+                            <span className="block truncate font-medium">{a.file_name}</span>
                             <span className="text-[10px] text-muted-foreground">
-                              {new Date(ev.created_at).toLocaleString()}
+                              From{" "}
+                              {attachmentSourceLabel(a.uploader_user_id, currentUserId, detail.assignee_user_id ?? null)}
                             </span>
                           </div>
-                          {canWriteInternal && ev.metadata_json && Object.keys(ev.metadata_json).length > 0 ? (
-                            <div className="mt-1 rounded border border-black/10 bg-black/[0.03] p-1 font-mono text-[9px] dark:border-white/10 dark:bg-white/[0.03]">
-                              {JSON.stringify(ev.metadata_json)}
-                            </div>
-                          ) : null}
-                        </div>
-                      ))
+                          <button
+                            type="button"
+                            className="shrink-0 text-[11px] font-semibold text-sky-600 underline dark:text-sky-400"
+                            onClick={() => void downloadAttachment(a.id, a.file_name)}
+                          >
+                            Download
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                   )}
+                </div>
+
+                <div className="rounded-xl border border-black/10 bg-slate-50/80 p-3 dark:border-white/10 dark:bg-white/[0.04]">
+                  <div className="mb-1.5 text-xs font-semibold text-[#1A202C] dark:text-foreground">Activity</div>
+                  <div className="max-h-[200px] space-y-2 overflow-y-auto">
+                    {detail.events.length === 0 ? (
+                      <div className="text-[11px] text-muted-foreground">No activity yet.</div>
+                    ) : (
+                      detail.events
+                        .slice()
+                        .reverse()
+                        .slice(0, canWriteInternal ? 20 : 15)
+                        .map((ev) => (
+                          <div
+                            key={ev.id}
+                            className={cn(
+                              "rounded-lg border border-black/10 p-1.5 text-[11px] dark:border-white/10",
+                              canWriteInternal ? "bg-white dark:bg-zinc-900/40" : "bg-white/80 dark:bg-zinc-900/30"
+                            )}
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="font-semibold capitalize">
+                                {ev.event_type.replace(/_/g, " ")}
+                              </span>
+                              <span className="text-[10px] text-muted-foreground">
+                                {new Date(ev.created_at).toLocaleString()}
+                              </span>
+                            </div>
+                            {activityMetadataEntries(ev.metadata_json).length > 0 ? (
+                              <div className="mt-1.5 rounded-md border border-black/10 bg-white/70 p-1.5 dark:border-white/10 dark:bg-zinc-900/40">
+                                <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                                  {activityMetadataEntries(ev.metadata_json).map((entry) => (
+                                    <div key={entry.key} className="min-w-0 rounded bg-black/[0.03] px-1.5 py-1 dark:bg-white/[0.04]">
+                                      <div className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                        {entry.label}
+                                      </div>
+                                      <div className="break-words text-[10px] font-medium text-slate-800 dark:text-slate-200">
+                                        {entry.value}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ))
+                    )}
+                  </div>
                 </div>
               </div>
 
@@ -1354,7 +1454,7 @@ export function MyTicketsPage({
                   {canWriteInternal ? "Add reply" : "Add an update"}
                 </div>
                 {canWriteInternal ? (
-                  <div className="space-y-1.5">
+                  <div className="space-y-2">
                     <label className="flex cursor-pointer items-center gap-2 text-[11px] text-muted-foreground">
                       <input
                         type="checkbox"
@@ -1364,30 +1464,39 @@ export function MyTicketsPage({
                       />
                       Internal note (not visible to customer)
                     </label>
-                    <div className="space-y-1">
-                      <input
-                        value={cannedSearch}
-                        onChange={(e) => setCannedSearch(e.target.value)}
-                        className="w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-[11px] dark:border-white/15 dark:bg-zinc-900"
-                        placeholder="Search canned responses..."
-                      />
-                      <div className="max-h-24 space-y-1 overflow-y-auto rounded-lg border border-black/10 bg-white p-1.5 dark:border-white/10 dark:bg-zinc-900/60">
-                        {cannedVisible.length === 0 ? (
-                          <div className="text-[10px] text-muted-foreground">No canned responses for this product.</div>
-                        ) : (
-                          cannedVisible.slice(0, 8).map((tpl) => (
-                            <button
-                              key={tpl.id}
-                              type="button"
-                              onClick={() => setMessage((prev) => `${prev}${prev.trim() ? "\n\n" : ""}${tpl.body}`)}
-                              className="block w-full rounded px-1.5 py-1 text-left text-[11px] hover:bg-slate-100 dark:hover:bg-white/10"
-                            >
-                              <div className="font-semibold">{tpl.title}</div>
-                              <div className="line-clamp-1 text-[10px] text-muted-foreground">{tpl.body}</div>
-                            </button>
-                          ))
-                        )}
+                    <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                      <div className="space-y-1">
+                        <input
+                          value={cannedSearch}
+                          onChange={(e) => setCannedSearch(e.target.value)}
+                          className="w-full rounded-lg border border-black/10 bg-white px-2 py-1 text-[11px] dark:border-white/15 dark:bg-zinc-900"
+                          placeholder="Search canned responses..."
+                        />
+                        <div className="max-h-28 space-y-1 overflow-y-auto rounded-lg border border-black/10 bg-white p-1.5 dark:border-white/10 dark:bg-zinc-900/60">
+                          {cannedVisible.length === 0 ? (
+                            <div className="text-[10px] text-muted-foreground">No canned responses for this product.</div>
+                          ) : (
+                            cannedVisible.slice(0, 8).map((tpl) => (
+                              <button
+                                key={tpl.id}
+                                type="button"
+                                onClick={() => setMessage((prev) => `${prev}${prev.trim() ? "\n\n" : ""}${tpl.body}`)}
+                                className="block w-full rounded px-1.5 py-1 text-left text-[11px] hover:bg-slate-100 dark:hover:bg-white/10"
+                              >
+                                <div className="font-semibold">{tpl.title}</div>
+                                <div className="line-clamp-1 text-[10px] text-muted-foreground">{tpl.body}</div>
+                              </button>
+                            ))
+                          )}
+                        </div>
                       </div>
+                      <textarea
+                        value={message}
+                        onChange={(e) => setMessage(e.target.value)}
+                        rows={7}
+                        className="w-full rounded-xl border border-black/10 bg-white px-2.5 py-1.5 text-xs dark:border-white/15 dark:bg-zinc-900"
+                        placeholder="Add a follow-up message..."
+                      />
                     </div>
                   </div>
                 ) : (
@@ -1396,13 +1505,15 @@ export function MyTicketsPage({
                     files or messages until you reopen a resolved ticket.
                   </p>
                 )}
-                <textarea
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-xl border border-black/10 bg-white px-2.5 py-1.5 text-xs dark:border-white/15 dark:bg-zinc-900"
-                  placeholder={canWriteInternal ? "Add a follow-up message..." : "Write a message to support..."}
-                />
+                {!canWriteInternal ? (
+                  <textarea
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    rows={3}
+                    className="w-full rounded-xl border border-black/10 bg-white px-2.5 py-1.5 text-xs dark:border-white/15 dark:bg-zinc-900"
+                    placeholder="Write a message to support..."
+                  />
+                ) : null}
                 <div className="flex justify-end">
                   <div className="flex flex-wrap items-center gap-2">
                     {canStatusChange ? (
@@ -1441,9 +1552,10 @@ export function MyTicketsPage({
                   </div>
                 </div>
               </div>
-            </div>
-          )}
-        </GlassCard>
+              </div>
+            )}
+          </GlassCard>
+        </div>
       ) : null}
     </div>
   );

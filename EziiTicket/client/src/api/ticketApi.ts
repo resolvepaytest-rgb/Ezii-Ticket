@@ -31,6 +31,7 @@ export type TicketMessage = {
   id: number;
   ticket_id: number;
   author_user_id: number | null;
+  author_name?: string | null;
   author_type: "customer" | "agent" | "system";
   body: string;
   /** Internal notes are hidden from customers in API responses. */
@@ -63,6 +64,7 @@ export type TicketAttachmentRow = {
 
 export type TicketDetail = TicketRow & {
   organisation_id: number;
+  organisation_name?: string | null;
   description: string;
   channel: "widget" | "portal" | "email";
   messages: TicketMessage[];

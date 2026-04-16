@@ -9,14 +9,13 @@ import {
   getExternalOrgAttributeSubAttributes,
   getExternalOrgAttributes,
   getExternalOrgWorkerTypes,
-  listOrganisationUserDirectory,
   listRoles,
-  listUserRoles,
   updateRole,
   type ApplyRoleTo,
   type ExternalOrganization,
   type Role,
 } from "@api/adminApi";
+import { getAuthMePermissions } from "@api/authApi";
 import { useAuthStore } from "@store/useAuthStore";
 import { EZII_BRAND } from "@/lib/eziiBrand";
 import { cn } from "@/lib/utils";
@@ -382,7 +381,7 @@ export function RolesPage() {
   const [draft, setDraft] = useState<DraftState | null>(null);
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [yourRoleName, setYourRoleName] = useState<string | null>(null);
+  const [meScopedRoleName, setMeScopedRoleName] = useState<string | null>(null);
   const [extAttributes, setExtAttributes] = useState<Array<{ attribute_id: string; attribute: string }>>([]);
   const [extSubAttributes, setExtSubAttributes] = useState<Array<{ attribute_sub_id: string; attribute_sub: string }>>(
     []
@@ -506,43 +505,22 @@ export function RolesPage() {
   }, []);
 
   useEffect(() => {
-    const authUserId = Number(authUser?.user_id);
-    const authOrgId = Number(authUser?.org_id);
-    if (!Number.isFinite(authUserId) || !Number.isFinite(authOrgId)) {
-      setYourRoleName(null);
+    if (!authUser) {
+      setMeScopedRoleName(null);
       return;
     }
-
-    const targetOrgId =
-      selectedOrgFilter !== "all" && Number.isFinite(Number(selectedOrgFilter))
-        ? Number(selectedOrgFilter)
-        : authOrgId;
-
     let cancelled = false;
-    void (async () => {
-      try {
-        const [roleRows, directory] = await Promise.all([
-          listUserRoles(authUserId),
-          listOrganisationUserDirectory(targetOrgId, true).catch(() => ({ users: [], has_local_users: true })),
-        ]);
-        if (cancelled) return;
-
-        const fromDirectory =
-          directory.users.find((u) => Number(u.user_id) === authUserId)?.ticket_role?.trim() ?? null;
-        const scoped = roleRows.find((r) => Number(r.scope_organisation_id) === targetOrgId);
-        const global = roleRows.find((r) => r.scope_organisation_id == null);
-        const fromUserRoles = scoped?.role_name?.trim() ?? global?.role_name?.trim() ?? null;
-
-        setYourRoleName(fromDirectory || fromUserRoles || null);
-      } catch {
-        if (!cancelled) setYourRoleName(null);
-      }
-    })();
-
+    void getAuthMePermissions()
+      .then((res) => {
+        if (!cancelled) setMeScopedRoleName(res.role_name ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setMeScopedRoleName(null);
+      });
     return () => {
       cancelled = true;
     };
-  }, [authUser?.org_id, authUser?.user_id, selectedOrgFilter]);
+  }, [authUser]);
 
   function startEdit(role: Role) {
     const current = permissionsSafe(role.permissions_json);
@@ -697,12 +675,15 @@ export function RolesPage() {
   const effectiveDraft = draft;
   const p = normalizePermissions(effectiveDraft?.permissions ?? defaultPermissions());
 
-  const isRootSystemAdminUser = Number(authUser?.user_id) === 1;
-  const yourRoleKey = isRootSystemAdminUser
+  const scopedRoleKey = meScopedRoleName ? baselineRoleKey(meScopedRoleName) : null;
+  const ticketRoleKey = authUser?.ticket_role ? baselineRoleKey(authUser.ticket_role) : null;
+  const authUserRoleKey = authUser?.role_name ? baselineRoleKey(authUser.role_name) : null;
+  const yourRoleKey = isSystemAdminUser
     ? baselineRoleKey("system_admin")
-    : yourRoleName
-      ? baselineRoleKey(yourRoleName)
-      : null;
+    : scopedRoleKey ?? ticketRoleKey ?? authUserRoleKey;
+  console.log("yourRoleKey", yourRoleKey);
+  console.log("ticketRoleKey", ticketRoleKey);
+  console.log("authUserRoleKey", authUserRoleKey);
 
   const allRows = useMemo(
     () => [...filteredCustomRoles, ...defaultRoles],
@@ -788,6 +769,9 @@ export function RolesPage() {
                   const rp = permissionsSafe(role.permissions_json);
                   const counts = permissionCounts(rp);
                   const isYourRole = yourRoleKey != null && baselineRoleKey(role.name) === yourRoleKey;
+                  console.log("isYourRole", isYourRole);
+                  console.log("yourRoleKey", yourRoleKey);
+                  console.log("baselineRoleKey(role.name)", baselineRoleKey(role.name));
                   return (
                     <tr
                       key={role.id}
@@ -797,8 +781,8 @@ export function RolesPage() {
                         <div className="flex items-center gap-2">
                           <span>{role.name}</span>
                           {isYourRole ? (
-                            <span className="rounded-full bg-[#16A34A]/15 px-2 py-0.5 text-[10px] font-bold text-[#16A34A]">
-                              You
+                            <span className="rounded-full bg-[#16A34A]/15 px-2 py-0.5 text-[10px] text-[#16A34A]">
+                              Your Role
                             </span>
                           ) : null}
                         </div>

@@ -236,6 +236,10 @@ export function RaiseTicketPage({ onCreated }: RaiseTicketPageProps) {
       toast.error("Select a product");
       return;
     }
+    if (categories.length > 0 && categoryId === "") {
+      toast.error("Select a category");
+      return;
+    }
     if (!subject.trim()) {
       toast.error("Subject is required");
       return;
@@ -327,7 +331,9 @@ export function RaiseTicketPage({ onCreated }: RaiseTicketPageProps) {
                 />
               </label>
               <label className="text-xs">
-                <div className="mb-1 text-[11px] text-muted-foreground">Category (optional)</div>
+                <div className="mb-1 text-[11px] text-muted-foreground">
+                  Category <span className="text-red-500">*</span>
+                </div>
                 {loadingCategories ? (
                   <div className="text-[11px] text-muted-foreground">Loading categories…</div>
                 ) : (
@@ -338,6 +344,7 @@ export function RaiseTicketPage({ onCreated }: RaiseTicketPageProps) {
                       setCategoryId(v ? Number(v) : "");
                       setSubcategoryId("");
                     }}
+                    required={categories.length > 0}
                     className="w-full rounded-lg border border-black/10 bg-white/5 px-3 py-2 text-xs dark:border-white/10"
                   >
                     <option value="">— Select category —</option>
@@ -526,7 +533,11 @@ export function RaiseTicketPage({ onCreated }: RaiseTicketPageProps) {
             <div className="flex items-center justify-end">
               <button
                 type="submit"
-                disabled={isSubmitting || productId === ""}
+                disabled={
+                  isSubmitting ||
+                  productId === "" ||
+                  (categories.length > 0 && categoryId === "")
+                }
                 className="rounded-lg bg-[#0F5EA8] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
               >
                 {isSubmitting ? "Creating..." : "Create Ticket"}

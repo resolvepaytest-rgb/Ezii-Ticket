@@ -3,7 +3,7 @@ import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
 import { toast } from "sonner";
 import { useAuthStore } from "@store/useAuthStore";
-import { BarChart3, CalendarDays, Pencil, Plus, ShieldCheck, Trash2, X } from "lucide-react";
+import { ArrowLeft, BarChart3, CalendarDays, Pencil, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import {
   createQueue,
@@ -106,20 +106,33 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
         setOrgScopedUserCountByOrgId(scopedCounts);
       } else {
         const usersSourceOrgId = orgIdNum;
-        const [productsRes, teamsRes, queuesRes, usersRes] = await Promise.all([
+        const [productsRes, teamsRes, queuesRes, usersRes, eziiUsersRes, scopeRows] = await Promise.all([
           listProducts(),
           listTeams(orgIdNum),
           listQueues(orgIdNum),
           listUsers(usersSourceOrgId),
+          listUsers(1),
+          listUserScopeOrg(orgIdNum).catch(() => []),
         ]);
         p = productsRes;
         t = teamsRes;
         q = queuesRes;
         filteredUsers = usersRes;
-        activeSourceUserIds = new Set(
-          usersRes
+        const activeEziiUserIds = new Set(
+          eziiUsersRes
             .filter((u) => (u.status ?? "").toLowerCase() === "active")
             .map((u) => Number(u.user_id))
+        );
+        activeSourceUserIds = new Set(
+          orgIdNum === 1
+            ? Array.from(activeEziiUserIds)
+            : Array.from(
+              new Set(
+                scopeRows
+                  .filter((s) => Number(s.scope_org_id) === orgIdNum && s.is_active && activeEziiUserIds.has(Number(s.user_id)))
+                  .map((s) => Number(s.user_id))
+              )
+            )
         );
         setOrgScopedUserCountByOrgId({ [orgIdNum]: activeSourceUserIds.size });
       }
@@ -233,10 +246,10 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
   async function getEligibleUsersForOrg(targetOrgId: number): Promise<User[]> {
     const normalizedOrgId = Number(targetOrgId);
     if (!Number.isFinite(normalizedOrgId)) return [];
-    if (isSystemAdminUser && normalizedOrgId !== 1) {
+    if (normalizedOrgId !== 1) {
       const [sourceUsers, scopedUsers] = await Promise.all([
         listUsers(1),
-        listUserScopeOrg(normalizedOrgId),
+        listUserScopeOrg(normalizedOrgId).catch(() => []),
       ]);
       const scopedIds = new Set(
         scopedUsers
@@ -964,13 +977,23 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <div className="text-sm font-semibold text-[#111827] dark:text-slate-100">{q.name}</div>
-                          <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                            {productById.get(Number(q.product_id ?? 0))?.name
-                              ? `• ${productById.get(Number(q.product_id ?? 0))?.name}`
-                              : ""}{" "}
-                            {team?.name ? `• ${team.name}` : "• Unassigned Team"}{" "}
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                            <span className="rounded-full border border-slate-300 bg-slate-100 px-2 py-0.5 font-semibold text-slate-700 dark:border-slate-600 dark:bg-slate-700/40 dark:text-slate-200">
+                              {productById.get(Number(q.product_id ?? 0))?.name ?? "No Product"}
+                            </span>
+                            <span
+                              className={`rounded-full px-2 py-0.5 font-semibold ${
+                                team
+                                  ? "border border-emerald-300 bg-emerald-100 text-emerald-700 dark:border-emerald-500/40 dark:bg-emerald-500/20 dark:text-emerald-300"
+                                  : "border border-amber-300 bg-amber-100 text-amber-700 dark:border-amber-500/40 dark:bg-amber-500/20 dark:text-amber-300"
+                              }`}
+                            >
+                              {team ? `Assigned • ${team.name}` : "Unassigned Team"}
+                            </span>
                             {orgName ? (
-                              <span className="font-semibold text-[#1E88E5] dark:text-sky-300">{`• ${orgName}`}</span>
+                              <span className="rounded-full border border-sky-300 bg-sky-100 px-2 py-0.5 font-semibold text-sky-700 dark:border-sky-500/40 dark:bg-sky-500/20 dark:text-sky-300">
+                                {orgName}
+                              </span>
                             ) : null}
                           </div>
                         </div>
@@ -980,7 +1003,10 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                       </div>
                       <div className="mt-3 flex items-center justify-between">
                         <div className="text-xs font-semibold text-[#111827] dark:text-slate-100">
-                          Assigned Agents ({teamStats?.members ?? 0}/{orgScopedUserCountByOrgId[q.organisation_id] ?? users.filter((u) => (u.status ?? "").toLowerCase() === "active").length})
+                          Assigned Agents (
+                          {team ? (teamStats?.members ?? 0) : 0}/
+                          {team ? (orgScopedUserCountByOrgId[q.organisation_id] ?? 0) : 0}
+                          )
                         </div>
                         {team ? (
                           <div className="flex items-center gap-2">
@@ -1120,21 +1146,23 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 <button type="button" onClick={() => setManageTeamsOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
               <div className="grid grid-cols-1 gap-3 border-b border-black/10 p-5 md:grid-cols-2 dark:border-white/10">
-                <label className="grid gap-1">
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
-                  <select
-                    value={teamManagerFilter.orgId}
-                    onChange={(e) => setTeamManagerFilter((f) => ({ ...f, orgId: e.target.value }))}
-                    className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10"
-                  >
-                    <option value="all">All Organizations</option>
-                    {teamManagerOrgOptions.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                {isSystemAdminUser ? (
+                  <label className="grid gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
+                    <select
+                      value={teamManagerFilter.orgId}
+                      onChange={(e) => setTeamManagerFilter((f) => ({ ...f, orgId: e.target.value }))}
+                      className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10"
+                    >
+                      <option value="all">All Organizations</option>
+                      {teamManagerOrgOptions.map((o) => (
+                        <option key={o.id} value={o.id}>
+                          {o.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Product</span>
                   <select
@@ -1165,8 +1193,13 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                           <div className="min-w-0">
                             <div className="text-sm font-semibold text-[#111827] dark:text-slate-100">{t.name}</div>
                             <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                              {`• ${productById.get(Number(t.product_id ?? 0))?.name ?? "No Product"}`}{" "}
-                              <span className="font-semibold text-[#1E88E5] dark:text-sky-300">{`• ${orgName}`}</span>
+                              {`• ${productById.get(Number(t.product_id ?? 0))?.name ?? "No Product"}`}
+                              {isSystemAdminUser ? (
+                                <>
+                                  {" "}
+                                  <span className="font-semibold text-[#1E88E5] dark:text-sky-300">{`• ${orgName}`}</span>
+                                </>
+                              ) : null}
                             </div>
                             <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
                               Members: {teamStatsById[t.id]?.members ?? 0}
@@ -1715,7 +1748,21 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
           <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
             <div className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/15 dark:bg-[#080D16]/95">
               <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 dark:border-white/10">
-                <div className="text-base font-semibold text-[#111827] dark:text-slate-100">Manage Team Members: {editingTeam.name}</div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingTeamId(null);
+                      setManageTeamsOpen(true);
+                    }}
+                    className="rounded-lg p-1.5 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"
+                    aria-label="Back to Manage All Teams"
+                    title="Back to Manage All Teams"
+                  >
+                    <ArrowLeft className="h-4 w-4" />
+                  </button>
+                  <div className="text-base font-semibold text-[#111827] dark:text-slate-100">Manage Team Members: {editingTeam.name}</div>
+                </div>
                 <button type="button" onClick={() => setEditingTeamId(null)} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
               <div className="overflow-y-auto p-5">

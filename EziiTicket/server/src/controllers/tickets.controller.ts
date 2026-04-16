@@ -1247,9 +1247,11 @@ export async function getTicketById(req: Request, res: Response) {
     `select t.id, t.ticket_code, t.organisation_id, t.product_id, t.category_id, t.subcategory_id, t.subject, t.description,
             t.channel, t.status, t.priority, t.reporter_user_id, t.assignee_user_id, t.queue_id, t.team_id,
             t.first_response_due_at, t.resolution_due_at, t.created_at, t.updated_at, t.metadata_json,
-            coalesce(nullif(trim(ru.user_name), ''), ru.name) as reporter_name
+            coalesce(nullif(trim(ru.user_name), ''), ru.name) as reporter_name,
+            o.name as organisation_name
      from tickets t
      left join users ru on ru.user_id = t.reporter_user_id and ru.organisation_id = t.organisation_id
+     left join organisations o on o.id = t.organisation_id
      where t.id = $1 and t.organisation_id = $2`,
     [ticketId, orgId]
   );
@@ -1268,11 +1270,15 @@ export async function getTicketById(req: Request, res: Response) {
 
   const viewerCanReadInternal = canDo(policy, "tickets.internal_notes.read");
   const messagesRes = await pool.query(
-    `select id, ticket_id, author_user_id, author_type, body, is_internal, attachments_json, created_at
-     from ticket_messages
-     where ticket_id = $1 and organisation_id = $2
+    `select m.id, m.ticket_id, m.author_user_id, m.author_type, m.body, m.is_internal, m.attachments_json, m.created_at,
+            coalesce(nullif(trim(u.user_name), ''), u.name) as author_name
+     from ticket_messages m
+     left join users u
+       on u.user_id = m.author_user_id
+      and u.organisation_id = m.organisation_id
+     where m.ticket_id = $1 and m.organisation_id = $2
        and ($3::boolean = true or coalesce(is_internal, false) = false)
-     order by created_at asc`,
+     order by m.created_at asc`,
     [ticketId, orgId, viewerCanReadInternal]
   );
 

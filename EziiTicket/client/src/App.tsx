@@ -1571,10 +1571,10 @@ export default function App() {
                   />
                 ) : null}
                 {activeNav === "agent_my_tickets" && canOpenMyTickets ? (
-                  <MyTicketsPage title="Agent My Tickets" focusTicketId={focusedTicketId} />
+                  <MyTicketsPage title="My Tickets" focusTicketId={focusedTicketId} />
                 ) : null}
                 {activeNav === "agent_team_queue" ? (
-                  <AgentTeamQueuePage />
+                  <AgentTeamQueuePage onOpenTicket={goToTicketByRole} />
                 ) : null}
                 {activeNav === "agent_history" ? (
                   <AgentHistoryPage onOpenTicket={goToTicketByRole} />
