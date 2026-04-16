@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { GlassCard } from "@components/common/GlassCard";
 import { listAdminAuditLogs, type AdminAuditLog } from "@api/adminApi";
-import { EZII_BRAND } from "@/lib/eziiBrand";
-import { CalendarDays, ChevronLeft, ChevronRight, Download, Printer, Search, ShieldCheck } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Download, Search, ShieldCheck } from "lucide-react";
 
 export function AdminAuditLogPage({ orgId }: { orgId: string }) {
   const [rows, setRows] = useState<AdminAuditLog[]>([]);
