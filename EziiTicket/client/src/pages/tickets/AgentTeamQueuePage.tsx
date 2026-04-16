@@ -9,8 +9,6 @@ import { ChevronDown, ListFilter } from "lucide-react";
 
 /** Theme-aware: strong headings / KPI numbers */
 const HEADING = "text-foreground";
-const PAGE_BG = "bg-muted/35 dark:bg-background";
-
 type LaneKey = "all" | "payroll" | "leave" | "benefits" | "onboarding";
 type SortKey = "wait_desc" | "wait_asc" | "priority" | "updated_desc";
 
