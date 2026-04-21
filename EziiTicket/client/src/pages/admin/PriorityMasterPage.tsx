@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
 import {
   createProductCategory,
   createProductSubcategory,
@@ -16,6 +17,7 @@ import {
 } from "@api/adminApi";
 import { EZII_BRAND } from "@/lib/eziiBrand";
 import { useAuthStore } from "@store/useAuthStore";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import { Plus, Trash2, X } from "lucide-react";
 import { createPortal } from "react-dom";
 
@@ -72,6 +74,8 @@ export function PriorityMasterPage({
 }) {
   const authUser = useAuthStore((s) => s.user);
   const canSwitchOrganization = useMemo(() => isEziiSystemAdminUser(authUser), [authUser]);
+  const canModify = useScreenModifyAccess("priority_master");
+  const modifyAccessMessage = "You don't have modify access";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -83,6 +87,7 @@ export function PriorityMasterPage({
   const [selectedPriorityFilters, setSelectedPriorityFilters] = useState<PriorityValue[]>([]);
   const [manageOpen, setManageOpen] = useState(false);
   const [manageProductId, setManageProductId] = useState<string>("");
+  const [manageCategoryMode, setManageCategoryMode] = useState<"new" | "existing">("new");
   const [newCategoryName, setNewCategoryName] = useState("");
   const [newSubCategoryNamesText, setNewSubCategoryNamesText] = useState("");
   const [existingCategoryForSubAdd, setExistingCategoryForSubAdd] = useState<string>("");
@@ -396,6 +401,14 @@ export function PriorityMasterPage({
     }
   }
 
+  async function handleManageCategorySubmit() {
+    if (manageCategoryMode === "new") {
+      await handleAddCustomCategoryAndSubCategory();
+      return;
+    }
+    await handleAddSubCategoriesToExistingCategory();
+  }
+
   async function handleDeleteSubCategory(subCategoryId: number) {
     const orgNum = Number(selectedOrgId);
     if (!Number.isFinite(orgNum) || orgNum <= 0) return;
@@ -452,27 +465,33 @@ export function PriorityMasterPage({
               </select>
             </label>
           ) : null}
-          <button
-            type="button"
-            onClick={() => {
-              setManageOpen(true);
-              if (!manageProductId && productOptions.length > 0) {
-                setManageProductId(String(productOptions[0]!.id));
-              }
-            }}
-            className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/[0.08] dark:text-slate-100"
-          >
-            Manage Categories
-          </button>
-          <button
-            type="button"
-            disabled={saving || dirtyCount === 0}
-            onClick={() => void saveChanges()}
-            className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
-            style={{ backgroundColor: EZII_BRAND.primary }}
-          >
-            {saving ? "Saving..." : `Save Changes${dirtyCount ? ` (${dirtyCount})` : ""}`}
-          </button>
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify}
+              onClick={() => {
+                setManageOpen(true);
+                setManageCategoryMode("new");
+                if (!manageProductId && productOptions.length > 0) {
+                  setManageProductId(String(productOptions[0]!.id));
+                }
+              }}
+              className="rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60 dark:border-white/15 dark:bg-white/[0.08] dark:text-slate-100"
+            >
+              Manage Categories
+            </button>
+          </InstantTooltip>
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify || saving || dirtyCount === 0}
+              onClick={() => void saveChanges()}
+              className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+              style={{ backgroundColor: EZII_BRAND.primary }}
+            >
+              {saving ? "Saving..." : `Save Changes${dirtyCount ? ` (${dirtyCount})` : ""}`}
+            </button>
+          </InstantTooltip>
         </div>
       </div>
 
@@ -637,7 +656,7 @@ export function PriorityMasterPage({
       {manageOpen && typeof document !== "undefined"
         ? createPortal(
             <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4 backdrop-blur-sm">
-              <div className="max-h-[90vh] w-full max-w-3xl overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/15 dark:bg-[#080D16]/95">
+              <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/15 dark:bg-[#080D16]/95">
                 <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 dark:border-white/10">
                   <div>
                     <div className="text-lg font-bold text-[#111827] dark:text-slate-100">Manage Custom Categories</div>
@@ -654,8 +673,9 @@ export function PriorityMasterPage({
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 border-b border-black/10 p-5 dark:border-white/10 md:grid-cols-6">
-                  <label className="md:col-span-2">
+                <div className="grid grid-cols-1 gap-3 border-b border-black/10 p-5 dark:border-white/10 md:grid-cols-12">
+                  {/* Row 1: product | toggle | new or existing category */}
+                  <label className="md:col-span-4">
                     <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Product</div>
                     <select
                       value={manageProductId}
@@ -670,63 +690,87 @@ export function PriorityMasterPage({
                       ))}
                     </select>
                   </label>
-                  <label className="md:col-span-2">
-                    <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">New custom category</div>
-                    <input
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      placeholder="Custom category"
-                      className="w-full rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
-                    />
-                  </label>
-                  <label className="md:col-span-2">
+                  <div className="md:col-span-4">
+                    <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Category selection</div>
+                    <div className="flex rounded-xl border border-black/10 bg-white/85 p-1 dark:border-white/15 dark:bg-white/10">
+                      <button
+                        type="button"
+                        onClick={() => setManageCategoryMode("new")}
+                        className={`flex-1 rounded-lg px-2 py-2 text-xs font-semibold transition ${
+                          manageCategoryMode === "new"
+                            ? "text-white"
+                            : "text-slate-700 dark:text-slate-200"
+                        }`}
+                        style={manageCategoryMode === "new" ? { backgroundColor: EZII_BRAND.primary } : undefined}
+                      >
+                        New category
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setManageCategoryMode("existing")}
+                        className={`flex-1 rounded-lg px-2 py-2 text-xs font-semibold transition ${
+                          manageCategoryMode === "existing"
+                            ? "text-white"
+                            : "text-slate-700 dark:text-slate-200"
+                        }`}
+                        style={manageCategoryMode === "existing" ? { backgroundColor: EZII_BRAND.primary } : undefined}
+                      >
+                        Existing category
+                      </button>
+                    </div>
+                  </div>
+                  {manageCategoryMode === "new" ? (
+                    <label className="md:col-span-4">
+                      <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">New custom category</div>
+                      <input
+                        value={newCategoryName}
+                        onChange={(e) => setNewCategoryName(e.target.value)}
+                        placeholder="Custom category"
+                        className="w-full rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
+                      />
+                    </label>
+                  ) : (
+                    <label className="md:col-span-4">
+                      <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">
+                        Existing category (default/custom)
+                      </div>
+                      <select
+                        value={existingCategoryForSubAdd}
+                        onChange={(e) => setExistingCategoryForSubAdd(e.target.value)}
+                        className="w-full rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
+                      >
+                        <option value="">Select category</option>
+                        {manageCategories.map((cat) => (
+                          <option key={cat.id} value={String(cat.id)}>
+                            {cat.name} {cat.is_system_default ? "(Default)" : "(Custom)"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  {/* Row 2: sub-categories (left) | submit (right) */}
+                  <div className="md:col-span-12">
                     <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">
                       Sub-categories (multiple)
                     </div>
-                    <textarea
-                      value={newSubCategoryNamesText}
-                      onChange={(e) => setNewSubCategoryNamesText(e.target.value)}
-                      placeholder="e.g. Late Salary, Incorrect Payslip"
-                      className="w-full rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
-                    />
-                  </label>
-                  <label className="md:col-span-3">
-                    <div className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">
-                      Existing category (default/custom)
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                      <textarea
+                        value={newSubCategoryNamesText}
+                        onChange={(e) => setNewSubCategoryNamesText(e.target.value)}
+                        placeholder="e.g. Late Salary, Incorrect Payslip"
+                        className="min-h-[80px] w-full flex-1 rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100 sm:min-h-[42px]"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleManageCategorySubmit()}
+                        disabled={manageBusy}
+                        className="inline-flex w-full shrink-0 items-center justify-center gap-1.5 rounded-lg px-4 py-2.5 text-xs font-semibold text-white disabled:opacity-60 sm:w-auto sm:self-stretch sm:py-2"
+                        style={{ backgroundColor: EZII_BRAND.primary }}
+                      >
+                        <Plus className="h-4 w-4" />
+                        {manageCategoryMode === "new" ? "Add new custom category" : "Add to selected category"}
+                      </button>
                     </div>
-                    <select
-                      value={existingCategoryForSubAdd}
-                      onChange={(e) => setExistingCategoryForSubAdd(e.target.value)}
-                      className="w-full rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
-                    >
-                      <option value="">Select category</option>
-                      {manageCategories.map((cat) => (
-                        <option key={cat.id} value={String(cat.id)}>
-                          {cat.name} {cat.is_system_default ? "(Default)" : "(Custom)"}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className="md:col-span-3 flex justify-end gap-2 self-end">
-                    <button
-                      type="button"
-                      onClick={() => void handleAddSubCategoriesToExistingCategory()}
-                      disabled={manageBusy}
-                      className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60 dark:border-white/15 dark:bg-white/[0.08] dark:text-slate-100"
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add to selected category
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleAddCustomCategoryAndSubCategory()}
-                      disabled={manageBusy}
-                      className="inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                      style={{ backgroundColor: EZII_BRAND.primary }}
-                    >
-                      <Plus className="h-4 w-4" />
-                      Add new custom category
-                    </button>
                   </div>
                 </div>
 
@@ -736,20 +780,17 @@ export function PriorityMasterPage({
                   ) : manageCategories.length === 0 ? (
                     <div className="text-xs text-slate-500 dark:text-slate-300">No categories found for selected product.</div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:gap-x-6">
                       {manageCategories.map((cat) => {
                         const subCustom = (cat.subcategories ?? []).filter((s) => !s.is_system_default);
                         const subDefault = (cat.subcategories ?? []).filter((s) => s.is_system_default);
                         const subs = [...subCustom, ...subDefault].sort((a, b) => a.name.localeCompare(b.name));
                         const isCustomCategory = !cat.is_system_default;
                         return (
-                          <div
-                            key={cat.id}
-                            className="rounded-xl border border-black/10 bg-white/65 p-3 dark:border-white/10 dark:bg-white/[0.05]"
-                          >
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                                {cat.name}{" "}
+                          <div key={cat.id} className="flex min-w-0 flex-col">
+                            <div className="flex items-start justify-between gap-2 border-b border-black/10 pb-2 dark:border-white/10">
+                              <div className="min-w-0 text-sm font-semibold leading-tight text-slate-800 dark:text-slate-100">
+                                <span className="break-words">{cat.name}</span>{" "}
                                 {cat.is_system_default ? (
                                   <span className="text-[10px] font-bold text-slate-500 dark:text-slate-300">(Default)</span>
                                 ) : (
@@ -761,20 +802,20 @@ export function PriorityMasterPage({
                                   type="button"
                                   onClick={() => void handleDeleteCategory(cat.id)}
                                   disabled={manageBusy}
-                                  className="rounded-md p-1.5 text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10"
+                                  className="shrink-0 rounded-md p-1.5 text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10"
                                   aria-label={`Delete category ${cat.name}`}
                                 >
                                   <Trash2 className="h-4 w-4" />
                                 </button>
                               ) : null}
                             </div>
-                            <div className="mt-2 space-y-1.5">
+                            <div className="mt-2 flex flex-col gap-1.5">
                               {subs.map((sub) => (
                                 <div
                                   key={sub.id}
-                                  className="flex items-center justify-between rounded-lg border border-black/10 bg-white/70 px-2.5 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.04]"
+                                  className="flex items-start justify-between gap-2 rounded-lg border border-black/10 bg-white/70 px-2.5 py-1.5 text-xs dark:border-white/10 dark:bg-white/[0.04]"
                                 >
-                                  <div className="text-slate-700 dark:text-slate-200">
+                                  <div className="min-w-0 break-words text-slate-700 dark:text-slate-200">
                                     {sub.name}{" "}
                                     {sub.is_system_default ? (
                                       <span className="text-[10px] font-bold text-slate-500 dark:text-slate-300">(Default)</span>
@@ -787,7 +828,7 @@ export function PriorityMasterPage({
                                       type="button"
                                       onClick={() => void handleDeleteSubCategory(sub.id)}
                                       disabled={manageBusy}
-                                      className="rounded-md p-1 text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10"
+                                      className="shrink-0 rounded-md p-1 text-red-600 hover:bg-red-50 dark:text-red-300 dark:hover:bg-red-500/10"
                                       aria-label={`Delete sub-category ${sub.name}`}
                                     >
                                       <Trash2 className="h-3.5 w-3.5" />

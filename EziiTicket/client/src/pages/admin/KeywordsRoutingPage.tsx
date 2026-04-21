@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
 import {
   createKeywordRouting,
   deleteKeywordRouting,
@@ -16,6 +17,7 @@ import {
   type Product,
 } from "@api/adminApi";
 import { useAuthStore } from "@store/useAuthStore";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import { EZII_BRAND } from "@/lib/eziiBrand";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 
@@ -50,6 +52,8 @@ export function KeywordsRoutingPage({ orgId }: { orgId: string }) {
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<KeywordRoutingEntry | null>(null);
   const [editPhrase, setEditPhrase] = useState("");
+  const canModify = useScreenModifyAccess("keyword_routing");
+  const modifyAccessMessage = "You don't have modify access";
 
   useEffect(() => {
     setSelectedOrgId(defaultSelectedOrgId);
@@ -247,16 +251,18 @@ export function KeywordsRoutingPage({ orgId }: { orgId: string }) {
               className="w-full rounded-xl border border-black/10 bg-white/80 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
             />
           </div>
-          <button
-            type="button"
-            disabled={saving}
-            onClick={() => void handleAdd()}
-            className="inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-            style={{ backgroundColor: EZII_BRAND.primary }}
-          >
-            <Plus className="h-4 w-4" />
-            Add
-          </button>
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify || saving}
+              onClick={() => void handleAdd()}
+              className="inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              style={{ backgroundColor: EZII_BRAND.primary }}
+            >
+              <Plus className="h-4 w-4" />
+              Add
+            </button>
+          </InstantTooltip>
         </div>
       </GlassCard>
 
@@ -268,8 +274,9 @@ export function KeywordsRoutingPage({ orgId }: { orgId: string }) {
         <div className="text-sm text-red-600">{error}</div>
       ) : entries.length === 0 ? (
         <GlassCard className="border-black/10 bg-white/35 p-8 text-center text-sm text-slate-600 dark:border-white/10 dark:bg-white/[0.06] dark:text-slate-300">
-          No keyword phrases for this organization yet. New organizations receive default Payroll / Leave / Attendance /
-          Expense phrases automatically. Run the latest database migration if this list should not be empty.
+          No keyword phrases for this organization yet. If this organization exists in Ezii Ticket, defaults are created
+          automatically when you open this screen, switch organization, or sign in from that org. Otherwise add phrases
+          above, or create the organization record first.
         </GlassCard>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -297,25 +304,31 @@ export function KeywordsRoutingPage({ orgId }: { orgId: string }) {
                         </td>
                         <td className="py-2 align-middle">
                           <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              className="rounded-lg p-1.5 text-slate-600 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"
-                              title="Edit phrase"
-                              onClick={() => {
-                                setEditing(row);
-                                setEditPhrase(row.phrase);
-                              }}
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                            <button
-                              type="button"
-                              className="rounded-lg p-1.5 text-red-600 hover:bg-red-500/10"
-                              title="Delete"
-                              onClick={() => void handleDelete(row)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                disabled={!canModify}
+                                className="rounded-lg p-1.5 text-slate-600 hover:bg-black/5 disabled:opacity-60 dark:text-slate-300 dark:hover:bg-white/10"
+                                title="Edit phrase"
+                                onClick={() => {
+                                  setEditing(row);
+                                  setEditPhrase(row.phrase);
+                                }}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </button>
+                            </InstantTooltip>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                disabled={!canModify}
+                                className="rounded-lg p-1.5 text-red-600 hover:bg-red-500/10 disabled:opacity-60"
+                                title="Delete"
+                                onClick={() => void handleDelete(row)}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </InstantTooltip>
                           </div>
                         </td>
                       </tr>
@@ -345,15 +358,17 @@ export function KeywordsRoutingPage({ orgId }: { orgId: string }) {
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                disabled={saving}
-                className="rounded-lg px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                style={{ backgroundColor: EZII_BRAND.primary }}
-                onClick={() => void saveEdit()}
-              >
-                Save
-              </button>
+              <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                <button
+                  type="button"
+                  disabled={!canModify || saving}
+                  className="rounded-lg px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  style={{ backgroundColor: EZII_BRAND.primary }}
+                  onClick={() => void saveEdit()}
+                >
+                  Save
+                </button>
+              </InstantTooltip>
             </div>
           </GlassCard>
         </div>

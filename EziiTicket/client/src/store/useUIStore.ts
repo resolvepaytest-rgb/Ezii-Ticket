@@ -5,7 +5,7 @@ type UIState = {
   counter: number;
   inc: () => void;
   reset: () => void;
-  brand: "ezii" | "resolve" | "client";
+  brand: "ezii" | "resolve" | "client" | "ngo";
   mode: "light" | "dark";
   setBrand: (brand: UIState["brand"]) => void;
   toggleMode: () => void;

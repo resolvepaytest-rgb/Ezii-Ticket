@@ -5,7 +5,7 @@ import { useUIStore } from "@store/useUIStore";
 /**
  * Centralized theme + brand controller.
  * - mode: adds/removes `dark` on <html>
- * - brand: sets `data-brand` on <html>
+ * - brand: sets `data-brand` on <html> (`ezii` | `resolve` | `client` | `ngo`)
  */
 export function ThemeProvider({ children }: PropsWithChildren) {
   const mode = useUIStore((s) => s.mode);

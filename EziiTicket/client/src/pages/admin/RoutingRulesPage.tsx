@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
 import {
   createRoutingRule,
   deleteRoutingRule,
@@ -21,6 +22,7 @@ import {
   type Role,
 } from "@api/adminApi";
 import { useAuthStore } from "@store/useAuthStore";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import { EZII_BRAND } from "@/lib/eziiBrand";
 import { ChevronDown, Pencil, Plus, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { createPortal } from "react-dom";
@@ -49,8 +51,7 @@ type RuleView = {
   rule: RoutingRule;
   orgName: string;
   productName: string;
-  /** First category name (for filters); not used when matchesAllCategories */
-  category: string;
+  categories: string[];
   subCategories: string[];
   matchesAllCategories: boolean;
   matchesAllSubcategories: boolean;
@@ -687,8 +688,20 @@ function MultiSelectDropdown(props: {
   disabled?: boolean;
   /** When set, shows this single label instead of listing every selected option (e.g. "All"). */
   summaryOverride?: string | null;
+  enableAllOption?: boolean;
+  allOptionLabel?: string;
 }) {
-  const { label, options, selectedIds, onChange, placeholder, disabled, summaryOverride } = props;
+  const {
+    label,
+    options,
+    selectedIds,
+    onChange,
+    placeholder,
+    disabled,
+    summaryOverride,
+    enableAllOption = false,
+    allOptionLabel = "All",
+  } = props;
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
@@ -763,6 +776,19 @@ function MultiSelectDropdown(props: {
             <div className="px-2 py-2 text-[11px] text-slate-500 dark:text-slate-400">No options</div>
           ) : (
             <div className="grid gap-1">
+              {enableAllOption ? (
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 hover:bg-black/5 dark:hover:bg-white/10">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.length === 0}
+                    onChange={(e) => {
+                      if (e.target.checked) onChange([]);
+                    }}
+                    className="h-4 w-4 accent-[#1E88E5]"
+                  />
+                  <span className="whitespace-nowrap text-[11px] font-semibold">{allOptionLabel}</span>
+                </label>
+              ) : null}
               {options.map((opt) => {
                 const checked = selectedSet.has(opt.id);
                 return (
@@ -844,6 +870,8 @@ function sanitizeRoutingConditions(conditions: Record<string, unknown>): Record<
 
 export function RoutingRulesPage({ orgId }: { orgId: string }) {
   const authUser = useAuthStore((s) => s.user);
+  const canModify = useScreenModifyAccess("routing_rules");
+  const modifyAccessMessage = "You don't have modify access";
   const isSystemAdminUser =
     String(authUser?.role_name ?? "").toLowerCase().trim() === "admin" &&
     String(authUser?.org_id ?? "") === "1" &&
@@ -911,8 +939,8 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
   const [draft, setDraft] = useState<RuleDraft>(emptyDraft(orgId));
   const [selectedOrgId, setSelectedOrgId] = useState<string>(defaultSelectedOrgId);
   const [rolesForLevels, setRolesForLevels] = useState<Role[]>([]);
-  const [filter, setFilter] = useState<{ orgId: string; category: string; subCategory: string }>({
-    orgId: "all",
+  const [filter, setFilter] = useState<{ product: string; category: string; subCategory: string }>({
+    product: "all",
     category: "all",
     subCategory: "all",
   });
@@ -967,7 +995,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
         const hasGlobalOrg = orgList.some((o) => Number(o.id) === 1);
         const orgsWithGlobal = hasGlobalOrg
           ? orgList
-          : ([{ id: 1, name: "Ezii HQ (Global Defaults)" } as Organisation, ...orgList]);
+          : ([{ id: 1, name: "Resolve Biz Services Pvt Ltd (Global Defaults)" } as Organisation, ...orgList]);
         setOrgs(orgsWithGlobal);
       } else {
         setOrgs([{ id: shellOrgId, name: `Organization ${shellOrgId}` } as Organisation]);
@@ -988,11 +1016,6 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
   useEffect(() => {
     setSelectedOrgId(defaultSelectedOrgId);
   }, [defaultSelectedOrgId]);
-
-  useEffect(() => {
-    if (!isOrgScopedAdmin) return;
-    setFilter((prev) => ({ ...prev, orgId: selectedOrgId || defaultSelectedOrgId }));
-  }, [isOrgScopedAdmin, selectedOrgId, defaultSelectedOrgId]);
 
   const fetchRulesForSelectedOrg = useCallback(async (orgIdOverride?: string) => {
     const orgIdToUse = orgIdOverride ?? selectedOrgId;
@@ -1036,61 +1059,113 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
       const ms = getMatchScope(conditions);
       const matchesAllCategories = ms?.categories === "all";
       const matchesAllSubcategories = ms?.subcategories === "all";
+      const rawCategories = conditions["categories"];
+      const rawCategoryNames = conditions["category_names"];
       const rawSubCategories = conditions["sub_categories"];
+      const rawSubCategoryNames = conditions["sub_category_names"];
+      const categories = [
+        ...(Array.isArray(rawCategories) ? rawCategories : []),
+        ...(Array.isArray(rawCategoryNames) ? rawCategoryNames : []),
+        conditions["category"],
+      ]
+        .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+        .map((x) => x.trim());
       const subCategories =
-        Array.isArray(rawSubCategories) && rawSubCategories.every((x) => typeof x === "string")
-          ? (rawSubCategories as string[])
-          : typeof conditions["sub_category"] === "string"
-            ? [conditions["sub_category"] as string]
-            : [];
-      const categoryName = typeof conditions["category"] === "string" ? conditions["category"] : "-";
+        [
+          ...(Array.isArray(rawSubCategories) ? rawSubCategories : []),
+          ...(Array.isArray(rawSubCategoryNames) ? rawSubCategoryNames : []),
+          conditions["sub_category"],
+        ]
+          .filter((x): x is string => typeof x === "string" && x.trim().length > 0)
+          .map((x) => x.trim());
       return {
         rule,
         orgName: orgMap.get(rule.organisation_id) ?? `Org ${rule.organisation_id}`,
         productName:
           typeof conditions["product_name"] === "string" ? conditions["product_name"] : "-",
-        category: matchesAllCategories ? "All" : categoryName,
+        categories,
         subCategories: subCategories.length > 0 ? subCategories : ["-"],
         matchesAllCategories,
         matchesAllSubcategories,
-        categoryDisplay: matchesAllCategories ? "All" : categoryName,
+        categoryDisplay: matchesAllCategories ? "All" : categories.length > 0 ? categories.join(", ") : "-",
         subCategoriesDisplay: matchesAllSubcategories ? "All" : subCategories.length > 0 ? subCategories.join(", ") : "-",
         startLevel: getStartLevelFromRule(rule),
       } as RuleView;
     });
   }, [allRules, orgs]);
 
+  const rulesForCategoryOptions = useMemo(() => {
+    return ruleViews.filter((v) => {
+      if (filter.product !== "all" && v.productName !== filter.product) return false;
+      return true;
+    });
+  }, [ruleViews, filter.product]);
+
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    rulesForCategoryOptions.forEach((r) => {
+      r.categories.forEach((c) => {
+        if (c !== "-") set.add(c);
+      });
+    });
+    return Array.from(set).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" })
+    );
+  }, [rulesForCategoryOptions]);
+
+  const rulesForSubCategoryOptions = useMemo(() => {
+    return ruleViews.filter((v) => {
+      if (filter.product !== "all" && v.productName !== filter.product) return false;
+      if (
+        filter.category !== "all" &&
+        !v.matchesAllCategories &&
+        !v.categories.includes(filter.category)
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [ruleViews, filter.product, filter.category]);
+
+  const subCategoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    rulesForSubCategoryOptions.forEach((r) => {
+      r.subCategories.forEach((sc) => {
+        if (sc !== "-") set.add(sc);
+      });
+    });
+    return Array.from(set).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" })
+    );
+  }, [rulesForSubCategoryOptions]);
+
   const filteredRules = useMemo(() => {
     return ruleViews.filter((v) => {
-      if (filter.orgId !== "all" && String(v.rule.organisation_id) !== filter.orgId) return false;
-      if (filter.category !== "all" && !v.matchesAllCategories && v.category !== filter.category) return false;
+      if (filter.product !== "all" && v.productName !== filter.product) return false;
+      if (
+        filter.category !== "all" &&
+        !v.matchesAllCategories &&
+        !v.categories.includes(filter.category)
+      ) {
+        return false;
+      }
       if (filter.subCategory !== "all" && !v.matchesAllSubcategories && !v.subCategories.includes(filter.subCategory)) return false;
       return true;
     });
   }, [ruleViews, filter]);
 
+  const productOptions = useMemo(() => {
+    const set = new Set<string>();
+    ruleViews.forEach((r) => {
+      if (r.productName !== "-") set.add(r.productName);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+  }, [ruleViews]);
+
   const stats = useMemo(() => {
     const active = filteredRules.filter((r) => r.rule.is_active).length;
     const paused = filteredRules.filter((r) => !r.rule.is_active).length;
     return { active, paused, total: filteredRules.length };
-  }, [filteredRules]);
-
-  const categoryOptions = useMemo(() => {
-    const set = new Set<string>();
-    filteredRules.forEach((r) => {
-      if (r.category !== "-") set.add(r.category);
-    });
-    return Array.from(set);
-  }, [filteredRules]);
-
-  const subCategoryOptions = useMemo(() => {
-    const set = new Set<string>();
-    filteredRules.forEach((r) => {
-      r.subCategories.forEach((sc) => {
-        if (sc !== "-") set.add(sc);
-      });
-    });
-    return Array.from(set);
   }, [filteredRules]);
 
   const orgDropdownOptions = useMemo(() => {
@@ -1099,7 +1174,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
       if (!o.id) continue;
       byId.set(String(o.id), o.organization_name || `Organization ${o.id}`);
     }
-    if (!byId.has("1")) byId.set("1", "Ezii HQ");
+    if (!byId.has("1")) byId.set("1", "Resolve Biz Services Pvt Ltd");
     if (selectedOrgId && !byId.has(selectedOrgId)) {
       byId.set(selectedOrgId, `Organization ${selectedOrgId}`);
     }
@@ -1713,39 +1788,28 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
             </select>
           </div>
         ) : null}
-        <button
-          type="button"
-          onClick={openCreate}
-          className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-white"
-          style={{ backgroundColor: EZII_BRAND.primary }}
-        >
-          <Plus className="h-4 w-4" />
-          Create New Execution Rule
-        </button>
+        <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+          <button
+            type="button"
+            disabled={!canModify}
+            onClick={openCreate}
+            className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-white disabled:opacity-60"
+            style={{ backgroundColor: EZII_BRAND.primary }}
+          >
+            <Plus className="h-4 w-4" />
+            Create New Execution Rule
+          </button>
+        </InstantTooltip>
       </div>
 
       <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
         <GlassCard className="border-black/10 bg-white/35 p-3.5 dark:border-white/10 dark:bg-white/[0.06]">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Active Rules</div>
           <div className="mt-1 text-2xl font-bold text-[#111827] dark:text-slate-100">{stats.active}</div>
-          <div className="mt-2 text-xs text-emerald-600">~ +3 from last month</div>
         </GlassCard>
         <GlassCard className="border-black/10 bg-white/35 p-3.5 dark:border-white/10 dark:bg-white/[0.06]">
           <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Total Rules</div>
           <div className="mt-1 text-2xl font-bold text-[#1E88E5]">{stats.total}</div>
-          <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200">
-            <div className="h-full rounded-full bg-[#1E88E5]" style={{ width: "72%" }} />
-          </div>
-        </GlassCard>
-        <GlassCard className="border-black/10 bg-white/35 p-3.5 dark:border-white/10 dark:bg-white/[0.06]">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Auto-Resolved</div>
-          <div className="mt-1 text-2xl font-bold text-[#111827] dark:text-slate-100">{(stats.total * 58).toLocaleString()}</div>
-          <div className="mt-2 text-xs text-slate-500">Monthly volume</div>
-        </GlassCard>
-        <GlassCard className="border-black/10 bg-white/35 p-3.5 dark:border-white/10 dark:bg-white/[0.06]">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Conflict Alerts</div>
-          <div className="mt-1 text-2xl font-bold text-red-600">{stats.paused.toString().padStart(2, "0")}</div>
-          <div className="mt-2 text-xs text-red-600">Requires attention</div>
         </GlassCard>
       </div>
 
@@ -1765,12 +1829,6 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
             >
               <SlidersHorizontal className="h-4 w-4" />
               Filter
-            </button>
-            <button
-              type="button"
-              className="rounded-full border border-black/10 bg-white/70 px-3 py-1.5 text-xs font-semibold dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
-            >
-              Bulk Action
             </button>
           </div>
         </div>
@@ -1807,35 +1865,44 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => openEdit(v.rule)}
-                      className="rounded-lg p-1.5 text-slate-700 transition-colors hover:bg-[#1E88E5]/12 hover:text-[#1E88E5] dark:text-slate-200 dark:hover:bg-[#1E88E5]/20 dark:hover:text-[#8ec5ff]"
-                      aria-label={`Edit ${v.rule.name}`}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRequest(v.rule)}
-                      className="rounded-full border border-red-200/80 p-1.5 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 dark:border-red-400/35 dark:text-red-300 dark:hover:bg-red-500/20 dark:hover:text-red-200"
-                      aria-label={`Delete ${v.rule.name}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                    <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                      <button
+                        type="button"
+                        disabled={!canModify}
+                        onClick={() => openEdit(v.rule)}
+                        className="rounded-lg p-1.5 text-slate-700 transition-colors hover:bg-[#1E88E5]/12 hover:text-[#1E88E5] disabled:opacity-60 dark:text-slate-200 dark:hover:bg-[#1E88E5]/20 dark:hover:text-[#8ec5ff]"
+                        aria-label={`Edit ${v.rule.name}`}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                    </InstantTooltip>
+                    <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                      <button
+                        type="button"
+                        disabled={!canModify}
+                        onClick={() => handleDeleteRequest(v.rule)}
+                        className="rounded-full border border-red-200/80 p-1.5 text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 disabled:opacity-60 dark:border-red-400/35 dark:text-red-300 dark:hover:bg-red-500/20 dark:hover:text-red-200"
+                        aria-label={`Delete ${v.rule.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </InstantTooltip>
                   </div>
                 </div>
               </div>
             ))}
 
-            <button
-              type="button"
-              onClick={openCreate}
-              className="mt-2.5 flex w-full flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-black/20 bg-white/40 px-3 py-6 text-xs text-slate-700 hover:bg-white/60 dark:border-white/20 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
-            >
-              <Plus className="h-5 w-5" />
-              <span className="font-semibold">Insert New Execution Rule</span>
-            </button>
+            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+              <button
+                type="button"
+                disabled={!canModify}
+                onClick={openCreate}
+                className="mt-2.5 flex w-full flex-col items-center justify-center gap-1 rounded-2xl border border-dashed border-black/20 bg-white/40 px-3 py-6 text-xs text-slate-700 hover:bg-white/60 disabled:opacity-60 dark:border-white/20 dark:bg-white/[0.05] dark:text-slate-200 dark:hover:bg-white/[0.08]"
+              >
+                <Plus className="h-5 w-5" />
+                <span className="font-semibold">Insert New Execution Rule</span>
+              </button>
+            </InstantTooltip>
           </div>
         ) : null}
       </GlassCard>
@@ -1852,21 +1919,18 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
             </div>
             <div className="grid grid-cols-1 gap-2.5 p-4 md:grid-cols-2">
               <label className="grid gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
+                <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Product</span>
                 <select
-                  value={filter.orgId}
-                  onChange={(e) => setFilter((f) => ({ ...f, orgId: e.target.value }))}
-                  disabled={isOrgScopedAdmin}
-                  className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100 disabled:opacity-70"
+                  value={filter.product}
+                  onChange={(e) => setFilter((f) => ({ ...f, product: e.target.value }))}
+                  className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs text-slate-800 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
                 >
-                  {isOrgScopedAdmin ? null : <option value="all">All</option>}
-                  {orgs
-                    .filter((o) => !isOrgScopedAdmin || String(o.id) === String(selectedOrgId))
-                    .map((o) => (
-                    <option key={o.id} value={String(o.id)}>
-                      {o.name}
+                  <option value="all">All</option>
+                  {productOptions.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
                     </option>
-                    ))}
+                  ))}
                 </select>
               </label>
               <label className="grid gap-1">
@@ -1897,7 +1961,7 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                 type="button"
                 onClick={() =>
                   setFilter({
-                    orgId: isOrgScopedAdmin ? String(selectedOrgId || defaultSelectedOrgId) : "all",
+                    product: "all",
                     category: "all",
                     subCategory: "all",
                   })
@@ -2020,6 +2084,8 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                   options={categoryDropdownOptions}
                   selectedIds={draft.categoryIds}
                   summaryOverride={categoriesSummaryIsAll ? "All" : null}
+                  enableAllOption
+                  allOptionLabel="All categories"
                   onChange={(next) =>
                     setDraft((d) => ({
                       ...d,
@@ -2037,6 +2103,8 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                   options={subCategoryDropdownOptions}
                   selectedIds={draft.subCategoryIds}
                   summaryOverride={subsDisplayAll ? "All" : null}
+                  enableAllOption
+                  allOptionLabel="All sub-categories"
                   onChange={(next) => setDraft((d) => ({ ...d, subCategoryIds: next, subCategoryNamesFallback: [] }))}
                 />
               </div>
@@ -2072,15 +2140,17 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                onClick={() => void handleCreateRuleClick()}
-                disabled={saving}
-                className="rounded-full px-6 py-2.5 text-xs font-semibold text-white disabled:opacity-60"
-                style={{ backgroundColor: EZII_BRAND.primary }}
-              >
-                {saving ? "Saving..." : editOpen ? "Save Rule" : "Create Rule"}
-              </button>
+              <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                <button
+                  type="button"
+                  onClick={() => void handleCreateRuleClick()}
+                  disabled={!canModify || saving}
+                  className="rounded-full px-6 py-2.5 text-xs font-semibold text-white disabled:opacity-60"
+                  style={{ backgroundColor: EZII_BRAND.primary }}
+                >
+                  {saving ? "Saving..." : editOpen ? "Save Rule" : "Create Rule"}
+                </button>
+              </InstantTooltip>
             </div>
           </div>
         </div>,
@@ -2127,35 +2197,41 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                   </button>
                   {deleteConfirmGlobalChoice ? (
                     <>
-                      <button
-                        type="button"
-                        className="rounded-lg px-4 py-2 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(30,136,229,0.25)] disabled:opacity-60"
-                        style={{ backgroundColor: EZII_BRAND.primary }}
-                        onClick={() => void handleDeleteConfirmed(deleteTargetRule, "all")}
-                        disabled={deleteBusy}
-                      >
-                        All org delete
-                      </button>
+                      <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                        <button
+                          type="button"
+                          className="rounded-lg px-4 py-2 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(30,136,229,0.25)] disabled:opacity-60"
+                          style={{ backgroundColor: EZII_BRAND.primary }}
+                          onClick={() => void handleDeleteConfirmed(deleteTargetRule, "all")}
+                          disabled={!canModify || deleteBusy}
+                        >
+                          All org delete
+                        </button>
+                      </InstantTooltip>
+                      <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                        <button
+                          type="button"
+                          className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                          style={{ backgroundColor: "#EF4444" }}
+                          onClick={() => void handleDeleteConfirmed(deleteTargetRule, "org")}
+                          disabled={!canModify || deleteBusy}
+                        >
+                          Selected Org Delete
+                        </button>
+                      </InstantTooltip>
+                    </>
+                  ) : (
+                    <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
                       <button
                         type="button"
                         className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
                         style={{ backgroundColor: "#EF4444" }}
                         onClick={() => void handleDeleteConfirmed(deleteTargetRule, "org")}
-                        disabled={deleteBusy}
+                        disabled={!canModify || deleteBusy}
                       >
-                        Selected Org Delete
+                        {deleteBusy ? "Deleting..." : "Delete"}
                       </button>
-                    </>
-                  ) : (
-                    <button
-                      type="button"
-                      className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                      style={{ backgroundColor: "#EF4444" }}
-                      onClick={() => void handleDeleteConfirmed(deleteTargetRule, "org")}
-                      disabled={deleteBusy}
-                    >
-                      {deleteBusy ? "Deleting..." : "Delete"}
-                    </button>
+                    </InstantTooltip>
                   )}
                 </div>
               </div>
@@ -2230,15 +2306,17 @@ export function RoutingRulesPage({ orgId }: { orgId: string }) {
                   >
                     Cancel
                   </button>
-                  <button
-                    type="button"
-                    className="rounded-full px-6 py-2.5 text-xs font-semibold text-white disabled:opacity-60"
-                    style={{ backgroundColor: EZII_BRAND.primary }}
-                    onClick={() => void confirmCreateWithConflictResolution()}
-                    disabled={saving}
-                  >
-                    {saving ? "Saving..." : createPendingPayload.mode === "edit" ? "Confirm and save" : "Confirm and create"}
-                  </button>
+                  <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                    <button
+                      type="button"
+                      className="rounded-full px-6 py-2.5 text-xs font-semibold text-white disabled:opacity-60"
+                      style={{ backgroundColor: EZII_BRAND.primary }}
+                      onClick={() => void confirmCreateWithConflictResolution()}
+                      disabled={!canModify || saving}
+                    >
+                      {saving ? "Saving..." : createPendingPayload.mode === "edit" ? "Confirm and save" : "Confirm and create"}
+                    </button>
+                  </InstantTooltip>
                 </div>
               </div>
             </div>,

@@ -2,9 +2,15 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
 import {
+  createUser,
+  getUserDesignation,
   getAgentsTicketMetrics,
   getExternalOrganizations,
+  listDesignations,
+  listOrganisationUserDirectory,
+  listRoles,
   listProducts,
   listQueues,
   listInvitedAgentUsers,
@@ -12,12 +18,18 @@ import {
   listTeams,
   listUserRoles,
   listUsers,
+  setUserDesignation,
+  setUserRoles,
   updateUser,
+  type Designation,
   type ExternalOrganization,
-  type Product,
+  type OrgDirectoryUser,
+  type Role,
   type User,
+  type UserDesignation,
 } from "@api/adminApi";
 import { useAuthStore } from "@store/useAuthStore";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import { EZII_BRAND } from "@/lib/eziiBrand";
 import {
   Activity,
@@ -26,12 +38,12 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  Download,
   Filter,
+  Search,
   Star,
   UserPlus,
   Users,
-  Zap,
+  X,
 } from "lucide-react";
 
 /** Ezii HQ org id — same as Users & Roles “invited” semantics (`origin_org_id === 1`). */
@@ -41,6 +53,15 @@ const EZII_HQ_ORG_LABEL = "Resolve Biz Services Pvt Ltd";
 
 type TierFilter = "all" | "L1" | "L2" | "L3";
 type StatusFilter = "all" | "active" | "online" | "offline";
+type InviteState = {
+  open: boolean;
+  query: string;
+  selectedUserIds: number[];
+  selectedRoleId: number | null;
+  selectedLevelKey: string;
+  saving: boolean;
+};
+const LEVEL_KEYS = ["l1", "l2", "l3"] as const;
 
 type AgentRow = {
   id: number;
@@ -62,6 +83,8 @@ type AgentRow = {
   csat: number | null;
   online: boolean;
   outOfOffice: boolean;
+  oooStartDate: string | null;
+  oooEndDate: string | null;
 };
 
 function initials(name: string) {
@@ -69,11 +92,45 @@ function initials(name: string) {
   return `${parts[0]?.[0] ?? "A"}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }
 
-function inferTier(roleName: string, userType: string | null): "L1" | "L2" | "L3" {
-  const src = `${roleName} ${userType ?? ""}`.toLowerCase();
-  if (src.includes("l3") || src.includes("senior")) return "L3";
-  if (src.includes("l2") || src.includes("specialist")) return "L2";
+function normalizeLevelKey(name: string | null | undefined): string {
+  if (!name) return "";
+  const n = name.trim().toLowerCase();
+  if (n === "l1" || n === "l1_agent") return "l1";
+  if (n === "l2" || n === "l2_specialist") return "l2";
+  if (n === "l3" || n === "l3_engineer") return "l3";
+  return "";
+}
+
+function inferTier(designation: UserDesignation | null | undefined): "L1" | "L2" | "L3" {
+  const key = normalizeLevelKey(
+    designation?.support_level_code ??
+      designation?.support_level_name ??
+      designation?.designation_code ??
+      designation?.designation_name
+  );
+  if (key === "l3") return "L3";
+  if (key === "l2") return "L2";
   return "L1";
+}
+
+function levelLabelFromKey(key: string | null | undefined): string {
+  if (key === "l1") return "L1";
+  if (key === "l2") return "L2";
+  if (key === "l3") return "L3";
+  return "—";
+}
+
+function supportLevelIdFromKey(designations: Designation[], key: string): number | null {
+  const match = designations.find((d) => {
+    const candidates = [normalizeLevelKey(d.code), normalizeLevelKey(d.name)];
+    return candidates.includes(key);
+  });
+  return match?.id ?? null;
+}
+
+function isLegacyLevelRoleName(name: string | null | undefined): boolean {
+  const n = String(name ?? "").trim().toLowerCase();
+  return n === "l1_agent" || n === "l2_specialist" || n === "l3_engineer";
 }
 
 function tierLabel(tier: "L1" | "L2" | "L3") {
@@ -114,20 +171,38 @@ export function AgentsPage({ orgId }: { orgId: string }) {
     authUser?.user_id === "1" &&
     authUser?.role_id === "1" &&
     authUser?.user_type_id === "1";
+  const canModify = useScreenModifyAccess("agent");
+  const modifyAccessMessage = "You don't have modify access";
 
   const [activeOrgId, setActiveOrgId] = useState<number | null>(shellOrgId);
   const [externalOrgs, setExternalOrgs] = useState<ExternalOrganization[]>([]);
   const [rows, setRows] = useState<AgentRow[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [designations, setDesignations] = useState<Designation[]>([]);
+  const [sourceUsers, setSourceUsers] = useState<User[]>([]);
+  const [targetUsers, setTargetUsers] = useState<User[]>([]);
+  const [directoryUsers, setDirectoryUsers] = useState<OrgDirectoryUser[]>([]);
   const [loading, setLoading] = useState(false);
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
-  const [productFilter, setProductFilter] = useState<number | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [productFilter, setProductFilter] = useState<string | "all">("all");
+  const [agentSearch, setAgentSearch] = useState("");
+  const [statusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number | "all">(10);
   const [listVersion, setListVersion] = useState(0);
   const [oooBusyId, setOooBusyId] = useState<number | null>(null);
+  const [oooRangeBusyId, setOooRangeBusyId] = useState<number | null>(null);
+  const [oooDraftByUserId, setOooDraftByUserId] = useState<Record<number, { start: string; end: string }>>({});
+  const [expandedOooRanges, setExpandedOooRanges] = useState<Set<number>>(new Set());
   const [expandedWorkloads, setExpandedWorkloads] = useState<Set<number>>(new Set());
+  const [invite, setInvite] = useState<InviteState>({
+    open: false,
+    query: "",
+    selectedUserIds: [],
+    selectedRoleId: null,
+    selectedLevelKey: "",
+    saving: false,
+  });
 
   useEffect(() => {
     setActiveOrgId(shellOrgId);
@@ -145,9 +220,16 @@ export function AgentsPage({ orgId }: { orgId: string }) {
     setLoading(true);
     void (async () => {
       try {
-        const [usersRes, invitedUsersRes, productsRes, teamsRes, queuesRes, ticketMetrics] = await Promise.all([
-          activeOrgId === EZII_ORG_ID ? listUsers(activeOrgId) : Promise.resolve([] as User[]),
+        const customerOrgInviteMode = isSystemAdminUser && activeOrgId !== EZII_ORG_ID;
+        const [usersRes, invitedUsersRes, sourceUsersRes, rolesRes, designationsRes, directoryBundle, productsRes, teamsRes, queuesRes, ticketMetrics] = await Promise.all([
+          listUsers(activeOrgId).catch(() => [] as User[]),
           activeOrgId !== EZII_ORG_ID ? listInvitedAgentUsers(activeOrgId) : Promise.resolve([] as User[]),
+          listUsers(activeOrgId === EZII_ORG_ID ? activeOrgId : EZII_ORG_ID).catch(() => [] as User[]),
+          listRoles(activeOrgId).catch(() => [] as Role[]),
+          listDesignations(activeOrgId).catch(() => [] as Designation[]),
+          customerOrgInviteMode
+            ? listOrganisationUserDirectory(activeOrgId, true).catch(() => ({ users: [] as OrgDirectoryUser[], has_local_users: true }))
+            : Promise.resolve({ users: [] as OrgDirectoryUser[], has_local_users: true }),
           listProducts(),
           listTeams(activeOrgId),
           listQueues(activeOrgId),
@@ -156,10 +238,23 @@ export function AgentsPage({ orgId }: { orgId: string }) {
         const metricsByUserId = new Map(
           ticketMetrics.map((m) => [m.user_id, m] as const)
         );
-        setProducts(productsRes);
 
-        // HQ: org 1 users. Tenant: server join `user_scope_org` + `users` (includes HQ-stored invited agents).
-        const usersForAgents = activeOrgId === EZII_ORG_ID ? usersRes : invitedUsersRes;
+        // HQ: show org users. Tenant: merge local customer users + HQ-stored invited users.
+        const usersForAgents = (() => {
+          if (activeOrgId === EZII_ORG_ID) return usersRes;
+          const merged = new Map<number, User>();
+          for (const u of usersRes) merged.set(Number(u.user_id), u);
+          for (const u of invitedUsersRes) {
+            const uid = Number(u.user_id);
+            if (!merged.has(uid)) merged.set(uid, u);
+          }
+          return Array.from(merged.values());
+        })();
+        setTargetUsers(usersForAgents);
+        setSourceUsers(sourceUsersRes);
+        setRoles(rolesRes);
+        setDesignations(designationsRes);
+        setDirectoryUsers(directoryBundle.users);
 
         const productNameById = new Map<number, string>();
         for (const p of productsRes) productNameById.set(p.id, p.name);
@@ -203,19 +298,26 @@ export function AgentsPage({ orgId }: { orgId: string }) {
           }
         }
 
-        const mapped = await Promise.all(
+        const mappedRaw = await Promise.all(
           usersForAgents.map(async (u) => {
             let roleName = "Support Associate";
+            let designation: UserDesignation | null = null;
+            let roleRows: Awaited<ReturnType<typeof listUserRoles>> = [];
             try {
-              const roles = await listUserRoles(Number(u.user_id));
-              const scoped = roles.find((r) => Number(r.scope_organisation_id) === activeOrgId);
-              const global = roles.find((r) => r.scope_organisation_id == null);
+              const [resolvedRoles, resolvedDesignation] = await Promise.all([
+                listUserRoles(Number(u.user_id)),
+                getUserDesignation(Number(u.user_id), activeOrgId).catch(() => null),
+              ]);
+              roleRows = resolvedRoles;
+              const scoped = resolvedRoles.find((r) => Number(r.scope_organisation_id) === activeOrgId);
+              const global = resolvedRoles.find((r) => r.scope_organisation_id == null);
               roleName = scoped?.role_name ?? global?.role_name ?? roleName;
+              designation = resolvedDesignation;
             } catch {
               // keep fallback role
             }
 
-            const tier = inferTier(roleName, u.user_type);
+            const tier = inferTier(designation);
             const uid = Number(u.user_id);
             const metrics = metricsByUserId.get(uid);
             const workloadCurrent = metrics?.open_count ?? 0;
@@ -227,7 +329,8 @@ export function AgentsPage({ orgId }: { orgId: string }) {
               openByProduct.set(productName, Number(entry.open_count) || 0);
             }
             const csat = metrics?.csat_avg ?? null;
-            const online = String(u.status).toLowerCase() === "active";
+            const active = String(u.status).toLowerCase() === "active";
+            const online = active && !u.out_of_office;
             const assignedProducts = Array.from(userProducts.get(Number(u.user_id)) ?? []);
             const workloadProductNames = Array.from(new Set([...assignedProducts, ...Array.from(openByProduct.keys())]))
               .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
@@ -252,21 +355,47 @@ export function AgentsPage({ orgId }: { orgId: string }) {
               csat,
               online,
               outOfOffice: Boolean(u.out_of_office),
+              oooStartDate: typeof u.ooo_start_date === "string" ? u.ooo_start_date : null,
+              oooEndDate: typeof u.ooo_end_date === "string" ? u.ooo_end_date : null,
             };
-            return row;
+            const hasLevelAssigned = normalizeLevelKey(
+              designation?.support_level_code ??
+              designation?.support_level_name ??
+              designation?.designation_code ??
+              designation?.designation_name
+            ) !== "";
+            const hasAgentRole = roleRows.some((role) => {
+              const inScope = Number(role.scope_organisation_id) === activeOrgId || role.scope_organisation_id == null;
+              return inScope && String(role.role_name ?? "").trim().toLowerCase() === "agent";
+            });
+            return {
+              row,
+              hasLevelAssigned,
+              hasAgentRole,
+            };
           })
         );
 
+        const mapped =
+          activeOrgId === EZII_ORG_ID
+            ? mappedRaw.map((entry) => entry.row)
+            : mappedRaw
+                .filter((entry) => entry.hasAgentRole || entry.hasLevelAssigned)
+                .map((entry) => entry.row);
         setRows(mapped);
       } catch {
         setRows([]);
-        setProducts([]);
+        setRoles([]);
+        setDesignations([]);
+        setSourceUsers([]);
+        setTargetUsers([]);
+        setDirectoryUsers([]);
         toast.error("Failed to load agents.");
       } finally {
         setLoading(false);
       }
     })();
-  }, [activeOrgId, listVersion]);
+  }, [activeOrgId, isSystemAdminUser, listVersion]);
 
   const toggleOutOfOffice = async (userId: number, next: boolean) => {
     setOooBusyId(userId);
@@ -281,20 +410,68 @@ export function AgentsPage({ orgId }: { orgId: string }) {
     }
   };
 
+  const saveOutOfOfficeRange = async (userId: number, start: string, end: string) => {
+    const normStart = start.trim();
+    const normEnd = end.trim();
+    if ((normStart && !normEnd) || (!normStart && normEnd)) {
+      toast.error("Please choose both OOO start and end date.");
+      return;
+    }
+    if (normStart && normEnd && normStart > normEnd) {
+      toast.error("OOO start date cannot be after end date.");
+      return;
+    }
+    setOooRangeBusyId(userId);
+    try {
+      await updateUser(userId, {
+        ooo_start_date: normStart || null,
+        ooo_end_date: normEnd || null,
+      });
+      toast.success(normStart ? "OOO date range saved." : "OOO date range cleared.");
+      setListVersion((v) => v + 1);
+    } catch {
+      toast.error("Failed to save OOO date range");
+    } finally {
+      setOooRangeBusyId(null);
+    }
+  };
+
+  const assignedProductOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          rows.flatMap((r) =>
+            r.assignedProducts.map((name) => name.trim()).filter(Boolean)
+          )
+        )
+      ).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" })),
+    [rows]
+  );
+
   const filtered = useMemo(() => {
+    const normalizedSelectedProductName =
+      productFilter === "all" ? null : productFilter.trim().toLowerCase();
+    const normalizedSearch = agentSearch.trim().toLowerCase();
+
     const base = rows.filter((r) => {
+      if (normalizedSearch) {
+        const haystack = `${r.name} ${r.email}`.toLowerCase();
+        if (!haystack.includes(normalizedSearch)) return false;
+      }
       if (tierFilter !== "all" && r.tier !== tierFilter) return false;
       if (statusFilter === "online" && !r.online) return false;
       if (statusFilter === "offline" && r.online) return false;
       if (statusFilter === "active" && String(r.status).toLowerCase() !== "active") return false;
-      if (productFilter !== "all") {
-        const name = products.find((p) => p.id === productFilter)?.name;
-        if (name && !r.assignedProducts.includes(name)) return false;
+      if (normalizedSelectedProductName) {
+        const hasSelectedProduct = r.assignedProducts.some(
+          (name) => name.trim().toLowerCase() === normalizedSelectedProductName
+        );
+        if (!hasSelectedProduct) return false;
       }
       return true;
     });
     return [...base].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
-  }, [rows, tierFilter, statusFilter, productFilter, products]);
+  }, [rows, tierFilter, statusFilter, productFilter, agentSearch]);
 
   const effectivePageSize = pageSize === "all" ? Math.max(1, filtered.length || 1) : pageSize;
   const totalPages = Math.max(1, Math.ceil(filtered.length / effectivePageSize));
@@ -306,7 +483,7 @@ export function AgentsPage({ orgId }: { orgId: string }) {
 
   useEffect(() => {
     setPage(1);
-  }, [tierFilter, productFilter, statusFilter, pageSize, activeOrgId]);
+  }, [tierFilter, productFilter, statusFilter, pageSize, activeOrgId, agentSearch]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -337,6 +514,173 @@ export function AgentsPage({ orgId }: { orgId: string }) {
     return [hq, ...rest];
   }, [externalOrgs]);
 
+  const customerOrgInviteMode =
+    isSystemAdminUser && activeOrgId != null && activeOrgId !== EZII_ORG_ID;
+  const assignableRoles = useMemo(
+    () => roles.filter((r) => !isLegacyLevelRoleName(r.name)),
+    [roles]
+  );
+  const defaultAgentRoleId = useMemo(() => {
+    const role = roles.find(
+      (r) => String(r.name ?? "").trim().toLowerCase() === "agent"
+    );
+    return role ? Number(role.id) : null;
+  }, [roles]);
+  const recommendedInviteRoleId = useMemo(() => defaultAgentRoleId, [defaultAgentRoleId]);
+  const levelOptions = useMemo(() => {
+    const fromBackend = designations
+      .map((d) => {
+        const key = normalizeLevelKey(d.code ?? d.name);
+        if (!key) return null;
+        return {
+          key,
+          label: String(d.name ?? d.code ?? levelLabelFromKey(key)),
+        };
+      })
+      .filter((option): option is { key: string; label: string } => option != null);
+    if (fromBackend.length > 0) return fromBackend;
+    return LEVEL_KEYS.map((key) => ({ key, label: levelLabelFromKey(key) }));
+  }, [designations]);
+  const orgName = useMemo(() => {
+    if (activeOrgId === EZII_ORG_ID) return EZII_HQ_ORG_LABEL;
+    return (
+      orgDropdownOptions.find((o) => Number(o.id) === activeOrgId)?.organization_name ??
+      `Organization ${activeOrgId ?? ""}`
+    );
+  }, [activeOrgId, orgDropdownOptions]);
+  const inviteCandidates = useMemo(() => {
+    const q = invite.query.trim().toLowerCase();
+    const mergedById = new Map<number, User>();
+    for (const u of sourceUsers) mergedById.set(Number(u.user_id), u);
+    if (customerOrgInviteMode) {
+      for (const d of directoryUsers) {
+        const uid = Number(d.user_id);
+        if (mergedById.has(uid) || Number(d.origin_org_id) !== EZII_ORG_ID) continue;
+        mergedById.set(uid, {
+          id: uid,
+          user_id: uid,
+          organisation_id: EZII_ORG_ID,
+          name: d.name,
+          email: d.email,
+          phone: null,
+          user_type: null,
+          status: "active",
+        });
+      }
+    } else {
+      for (const u of targetUsers) {
+        const uid = Number(u.user_id);
+        if (!mergedById.has(uid)) mergedById.set(uid, u);
+      }
+    }
+    const all = Array.from(mergedById.values());
+    const rows = q
+      ? all.filter(
+          (u) =>
+            (u.name ?? "").toLowerCase().includes(q) ||
+            (u.email ?? "").toLowerCase().includes(q) ||
+            String(u.user_id).includes(q)
+        )
+      : all;
+    rows.sort((a, b) =>
+      (a.name ?? "").trim().localeCompare((b.name ?? "").trim(), undefined, {
+        sensitivity: "base",
+      })
+    );
+    return rows;
+  }, [sourceUsers, directoryUsers, targetUsers, invite.query, customerOrgInviteMode]);
+
+  async function ensureUserExistsForTarget(
+    userId: number,
+    selected: Pick<User, "user_id" | "organisation_id" | "name" | "email" | "phone" | "user_type" | "status"> | null,
+    targetOrgId: number
+  ) {
+    const scopedMode = isSystemAdminUser && targetOrgId !== EZII_ORG_ID;
+    const createInOrgId = scopedMode ? EZII_ORG_ID : targetOrgId;
+    if (selected && Number(selected.organisation_id) !== createInOrgId) {
+      await createUser({
+        user_id: Number(selected.user_id),
+        organisation_id: createInOrgId,
+        name: selected.name,
+        email: selected.email,
+        phone: selected.phone ?? null,
+        user_type: selected.user_type ?? null,
+        status: selected.status,
+      });
+    }
+    return { userId, scopeOrgId: scopedMode ? targetOrgId : undefined };
+  }
+
+  async function handleInviteSubmit() {
+    if (!activeOrgId) return;
+    if (!invite.selectedUserIds.length) return toast.error("Select at least one user");
+    if (customerOrgInviteMode) {
+      const levelKey = invite.selectedLevelKey.trim();
+      if (!levelKey || !LEVEL_KEYS.includes(levelKey as (typeof LEVEL_KEYS)[number])) {
+        return toast.error("Select a level (L1 / L2 / L3)");
+      }
+      if (defaultAgentRoleId == null) return toast.error("Agent role not found for this organization.");
+    } else if (!invite.selectedRoleId) {
+      return toast.error("Select a role");
+    }
+
+    setInvite((prev) => ({ ...prev, saving: true }));
+    try {
+      let inviteBatchSupportLevelId: number | null = null;
+      if (customerOrgInviteMode) {
+        inviteBatchSupportLevelId = supportLevelIdFromKey(
+          designations,
+          invite.selectedLevelKey.trim() as (typeof LEVEL_KEYS)[number]
+        );
+        if (inviteBatchSupportLevelId == null) {
+          throw new Error("Level options are not configured for this organization.");
+        }
+      }
+
+      let processed = 0;
+      for (const selectedUserId of invite.selectedUserIds) {
+        const selectedUser =
+          sourceUsers.find((u) => Number(u.user_id) === selectedUserId) ??
+          targetUsers.find((u) => Number(u.user_id) === selectedUserId) ??
+          null;
+        if (!selectedUser) continue;
+        const resolved = await ensureUserExistsForTarget(
+          Number(selectedUser.user_id),
+          selectedUser,
+          activeOrgId
+        );
+        if (customerOrgInviteMode) {
+          await setUserRoles(resolved.userId, [defaultAgentRoleId!], resolved.scopeOrgId);
+          await setUserDesignation(resolved.userId, {
+            support_level_id: inviteBatchSupportLevelId!,
+            organisation_id: activeOrgId,
+          });
+        } else {
+          await setUserRoles(resolved.userId, [invite.selectedRoleId!], resolved.scopeOrgId);
+        }
+        processed += 1;
+      }
+      if (processed === 0) throw new Error("Selected users not found");
+      toast.success(
+        processed === 1
+          ? "Invitation/assignment saved for 1 user."
+          : `Invitation/assignment saved for ${processed} users.`
+      );
+      setInvite({
+        open: false,
+        query: "",
+        selectedUserIds: [],
+        selectedRoleId: null,
+        selectedLevelKey: "",
+        saving: false,
+      });
+      setListVersion((v) => v + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to invite user");
+      setInvite((prev) => ({ ...prev, saving: false }));
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[1300px] min-w-0 space-y-3 pb-8">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -361,19 +705,28 @@ export function AgentsPage({ orgId }: { orgId: string }) {
               </select>
             </label>
           ) : null}
-          <button className="inline-flex items-center gap-1 rounded-xl border border-black/10 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
-            <Download className="h-3.5 w-3.5" />
-            Export CSV
-          </button>
-          <button
-            type="button"
-            onClick={() => toast.message("Invite flow", { description: "Invite New Agent modal can be wired next." })}
-            className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-[11px] font-semibold text-white"
-            style={{ backgroundColor: EZII_BRAND.primary }}
-          >
-            <UserPlus className="h-3.5 w-3.5" />
-            Invite New Agent
-          </button>
+
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify}
+              onClick={() =>
+                setInvite((prev) => ({
+                  ...prev,
+                  open: true,
+                  query: "",
+                  selectedUserIds: [],
+                  selectedRoleId: customerOrgInviteMode ? defaultAgentRoleId : recommendedInviteRoleId,
+                  selectedLevelKey: "",
+                }))
+              }
+              className="inline-flex items-center gap-1 rounded-xl px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60"
+              style={{ backgroundColor: EZII_BRAND.primary }}
+            >
+              <UserPlus className="h-3.5 w-3.5" />
+              Invite New Agent
+            </button>
+          </InstantTooltip>
         </div>
       </div>
 
@@ -392,7 +745,7 @@ export function AgentsPage({ orgId }: { orgId: string }) {
             <div className="rounded-xl bg-amber-100 p-1.5 text-amber-700 dark:bg-amber-400/20 dark:text-amber-300"><Activity className="h-3.5 w-3.5" /></div>
           </div>
           <div className="mt-1.5 text-3xl font-semibold text-slate-900 dark:text-slate-100">{kpis.onlineNow}</div>
-          <div className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400">{kpis.onlinePct}% of agents (active status)</div>
+          <div className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400">{kpis.onlinePct}% of agents (active, not OOO)</div>
         </GlassCard>
         <GlassCard className="border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.05]">
           <div className="flex items-start justify-between">
@@ -433,33 +786,34 @@ export function AgentsPage({ orgId }: { orgId: string }) {
         </div>
         <div className="flex items-center gap-1.5">
           <label className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
+            <Search className="h-3.5 w-3.5" />
+            <input
+              type="text"
+              value={agentSearch}
+              onChange={(e) => setAgentSearch(e.target.value)}
+              placeholder="Search Agent Name or Email"
+              className="w-[180px] bg-transparent text-[11px] font-medium outline-none placeholder:text-slate-400 dark:placeholder:text-slate-500"
+            />
+          </label>
+          <label className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
             <Filter className="h-3.5 w-3.5" />
-            Product:
+            Assigned Products:
             <select
               value={String(productFilter)}
-              onChange={(e) => setProductFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
+              onChange={(e) =>
+                setProductFilter(e.target.value === "all" ? "all" : e.target.value)
+              }
               className="bg-transparent outline-none"
             >
               <option value="all">All</option>
-              {products.map((p) => (
-                <option key={p.id} value={String(p.id)}>{p.name}</option>
+              {assignedProductOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
               ))}
             </select>
           </label>
-          <label className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
-            <Zap className="h-3.5 w-3.5" />
-            Status:
-            <select
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
-              className="bg-transparent outline-none"
-            >
-              <option value="all">All accounts</option>
-              <option value="active">Active</option>
-              <option value="online">Online</option>
-              <option value="offline">Offline</option>
-            </select>
-          </label>
+          
         </div>
       </div>
 
@@ -474,7 +828,7 @@ export function AgentsPage({ orgId }: { orgId: string }) {
                 <th className="px-4 py-3 text-[10px] font-semibold">Workload</th>
                 <th className="px-4 py-3 text-[10px] font-semibold">CSAT</th>
                 <th className="px-4 py-3 text-[10px] font-semibold">Status</th>
-                <th className="px-4 py-3 text-[10px] font-semibold">OOO</th>
+                <th className="px-4 py-3 text-[10px] font-semibold">Out Of Office</th>
               </tr>
             </thead>
             <tbody>
@@ -594,16 +948,86 @@ export function AgentsPage({ orgId }: { orgId: string }) {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300">
-                          <input
-                            type="checkbox"
-                            checked={r.outOfOffice}
-                            disabled={oooBusyId === r.id}
-                            onChange={(e) => void toggleOutOfOffice(r.id, e.target.checked)}
-                            className="rounded border-slate-300"
-                          />
-                          {r.outOfOffice ? <span className="text-amber-700 dark:text-amber-400">OOO</span> : <span className="text-slate-400">—</span>}
-                        </label>
+                        <div className="space-y-2">
+                          <label className="inline-flex cursor-pointer items-center gap-1.5 text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                            <input
+                              type="checkbox"
+                              checked={r.outOfOffice}
+                              disabled={!canModify || oooBusyId === r.id}
+                              onChange={(e) => void toggleOutOfOffice(r.id, e.target.checked)}
+                              className="rounded border-slate-300"
+                              title={!canModify ? modifyAccessMessage : undefined}
+                            />
+                            {r.outOfOffice ? <span className="text-amber-700 dark:text-amber-400">OOO</span> : <span className="text-slate-400">—</span>}
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setExpandedOooRanges((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(r.id)) next.delete(r.id);
+                                else next.add(r.id);
+                                return next;
+                              })
+                            }
+                            className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-600 dark:text-slate-300"
+                          >
+                            {expandedOooRanges.has(r.id) ? (
+                              <>
+                                <ChevronUp className="h-3 w-3" />
+                                Date range
+                              </>
+                            ) : (
+                              <>
+                                <ChevronDown className="h-3 w-3" />
+                                Date range
+                              </>
+                            )}
+                          </button>
+                          {expandedOooRanges.has(r.id) ? (
+                            <div className="flex flex-col gap-1">
+                              <input
+                                type="date"
+                                value={oooDraftByUserId[r.id]?.start ?? r.oooStartDate ?? ""}
+                                disabled={!canModify || oooRangeBusyId === r.id}
+                                onChange={(e) =>
+                                  setOooDraftByUserId((prev) => ({
+                                    ...prev,
+                                    [r.id]: { start: e.target.value, end: prev[r.id]?.end ?? r.oooEndDate ?? "" },
+                                  }))
+                                }
+                                className="rounded border border-black/10 bg-white/80 px-1.5 py-1 text-[10px] dark:border-white/15 dark:bg-white/10"
+                              />
+                              <input
+                                type="date"
+                                value={oooDraftByUserId[r.id]?.end ?? r.oooEndDate ?? ""}
+                                disabled={!canModify || oooRangeBusyId === r.id}
+                                onChange={(e) =>
+                                  setOooDraftByUserId((prev) => ({
+                                    ...prev,
+                                    [r.id]: { start: prev[r.id]?.start ?? r.oooStartDate ?? "", end: e.target.value },
+                                  }))
+                                }
+                                className="rounded border border-black/10 bg-white/80 px-1.5 py-1 text-[10px] dark:border-white/15 dark:bg-white/10"
+                              />
+                              <button
+                                type="button"
+                                disabled={!canModify || oooRangeBusyId === r.id}
+                                onClick={() =>
+                                  void saveOutOfOfficeRange(
+                                    r.id,
+                                    oooDraftByUserId[r.id]?.start ?? r.oooStartDate ?? "",
+                                    oooDraftByUserId[r.id]?.end ?? r.oooEndDate ?? ""
+                                  )
+                                }
+                                title={!canModify ? modifyAccessMessage : undefined}
+                                className="rounded bg-[#1E88E5] px-2 py-1 text-[10px] font-semibold text-white transition-colors hover:bg-[#1976D2] disabled:opacity-50 dark:bg-[#1E88E5] dark:hover:bg-[#1565C0]"
+                              >
+                                {oooRangeBusyId === r.id ? "Saving..." : "Save range"}
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -668,6 +1092,152 @@ export function AgentsPage({ orgId }: { orgId: string }) {
           </div>
         </div>
       </GlassCard>
+      {invite.open ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/10 dark:bg-zinc-950/90">
+            <div className="flex items-start justify-between gap-3 border-b border-black/10 px-6 py-5 dark:border-white/10">
+              <div>
+                <h2 className="text-lg font-bold text-[#111827] dark:text-slate-100">
+                  Invite New User to {orgName}
+                </h2>
+                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  Add a team member to the organizational directory.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setInvite((prev) => ({ ...prev, open: false }))}
+                className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="space-y-4 px-6 py-5">
+              <div>
+                <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Find User</div>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                  <input
+                    value={invite.query}
+                    onChange={(e) => setInvite((prev) => ({ ...prev, query: e.target.value }))}
+                    placeholder="Search users by name or email..."
+                    className="w-full rounded-xl border border-black/10 bg-white/75 py-2.5 pl-9 pr-3 text-xs dark:border-white/10 dark:bg-white/10"
+                  />
+                </div>
+              </div>
+              <div className="max-h-[220px] overflow-y-auto rounded-xl border border-black/10 bg-white/50 p-2 dark:border-white/10 dark:bg-white/[0.04]">
+                {inviteCandidates.map((u) => {
+                  const uid = Number(u.user_id);
+                  const selected = invite.selectedUserIds.includes(uid);
+                  return (
+                    <button
+                      key={u.user_id}
+                      type="button"
+                      onClick={() =>
+                        setInvite((prev) => ({
+                          ...prev,
+                          selectedUserIds: selected
+                            ? prev.selectedUserIds.filter((id) => id !== uid)
+                            : [...prev.selectedUserIds, uid],
+                        }))
+                      }
+                      className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left ${
+                        selected ? "bg-[#1E88E5]/10" : "hover:bg-black/5 dark:hover:bg-white/10"
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{u.name}</div>
+                        <div className="text-xs text-slate-500">{u.email}</div>
+                      </div>
+                      <div
+                        className={`h-4 w-4 shrink-0 rounded-full border ${
+                          selected ? "border-[#1E88E5] bg-[#1E88E5]" : "border-slate-300"
+                        }`}
+                      />
+                    </button>
+                  );
+                })}
+                {!inviteCandidates.length ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground">No users found.</div>
+                ) : null}
+              </div>
+              <div>
+                {customerOrgInviteMode ? (
+                  <>
+                    <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Level</div>
+                    <select
+                      value={invite.selectedLevelKey}
+                      onChange={(e) =>
+                        setInvite((prev) => ({
+                          ...prev,
+                          selectedLevelKey: e.target.value,
+                        }))
+                      }
+                      className="w-full rounded-xl border border-black/10 bg-white/75 px-3 py-2.5 text-xs dark:border-white/10 dark:bg-white/10"
+                    >
+                      <option value="">Select level</option>
+                      {levelOptions.map((option) => (
+                        <option key={option.key} value={option.key}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Assigned role in this organization is fixed to <strong>Agent</strong>. Level is saved separately
+                      for routing (L1 / L2 / L3).
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Assigned Role</div>
+                    <select
+                      value={invite.selectedRoleId ?? ""}
+                      onChange={(e) =>
+                        setInvite((prev) => ({
+                          ...prev,
+                          selectedRoleId: Number(e.target.value),
+                        }))
+                      }
+                      className="w-full rounded-xl border border-black/10 bg-white/75 px-3 py-2.5 text-xs dark:border-white/10 dark:bg-white/10"
+                    >
+                      <option value="">Select role</option>
+                      {assignableRoles.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </>
+                )}
+                <p className="mt-1 text-xs text-slate-500">
+                  Selected users: {invite.selectedUserIds.length}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-6 py-4 dark:border-white/10 dark:bg-white/[0.02]">
+              <button
+                type="button"
+                onClick={() => setInvite((prev) => ({ ...prev, open: false }))}
+                className="rounded-lg px-4 py-2 text-xs font-medium text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
+              >
+                Cancel
+              </button>
+              <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                <button
+                  type="button"
+                  disabled={!canModify || invite.saving}
+                  onClick={() => void handleInviteSubmit()}
+                  className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  style={{ backgroundColor: EZII_BRAND.primary }}
+                >
+                  {invite.saving ? "Sending..." : "Send Invitation"}
+                </button>
+              </InstantTooltip>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

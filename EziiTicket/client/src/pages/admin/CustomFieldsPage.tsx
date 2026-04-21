@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { GlassCard } from "@components/common/GlassCard";
 import {
@@ -11,18 +12,20 @@ import {
   type Product,
 } from "@api/adminApi";
 import { EZII_BRAND } from "@/lib/eziiBrand";
+import { InstantTooltip } from "@components/common/InstantTooltip";
+import { SwitchToggle } from "@components/common/SwitchToggle";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import {
   CalendarDays,
   CheckSquare,
   ChevronRight,
   Circle,
-  CirclePlus,
   Hash,
-  Lock,
   Pencil,
   Plus,
   Trash2,
   Type,
+  X,
 } from "lucide-react";
 
 type CustomFieldType =
@@ -112,7 +115,12 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [pendingDeleteField, setPendingDeleteField] = useState<CustomField | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<"deployed" | "drafts">("deployed");
+  const canModify = useScreenModifyAccess("custom_fields");
+  const modifyAccessMessage = "You don't have modify access";
 
   const [form, setForm] = useState({
     product_id: "",
@@ -124,23 +132,22 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
     is_active: true,
   });
 
-  const activeLibraryItem = useMemo(
-    () => FIELD_LIBRARY.find((x) => x.key === form.field_type) ?? FIELD_LIBRARY[0],
-    [form.field_type]
-  );
-
-  const fieldKeyPreview = useMemo(() => toFieldKey(form.label), [form.label]);
-
   const sortedRows = useMemo(
     () => [...rows].sort((a, b) => Number(b.is_active) - Number(a.is_active) || a.label.localeCompare(b.label)),
     [rows]
   );
+  const activeLibraryItem = useMemo(
+    () => FIELD_LIBRARY.find((x) => x.key === form.field_type) ?? FIELD_LIBRARY[0],
+    [form.field_type]
+  );
+  const deployedRows = useMemo(() => sortedRows.filter((x) => Boolean(x.is_active)), [sortedRows]);
+  const draftRows = useMemo(() => sortedRows.filter((x) => !x.is_active), [sortedRows]);
+  const visibleRows = activeTab === "deployed" ? deployedRows : draftRows;
 
   async function load() {
-    if (!orgIdNum) return;
     setLoading(true);
     try {
-      const [p, c] = await Promise.all([listProducts(), listCustomFields(orgIdNum)]);
+      const [p, c] = await Promise.all([listProducts(), listCustomFields()]);
       setProducts(p);
       setRows(c);
     } catch {
@@ -154,8 +161,7 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
 
   useEffect(() => {
     void load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgIdNum]);
+  }, []);
 
   useEffect(() => {
     if (products.length === 0) return;
@@ -173,10 +179,10 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
       options_csv: optionsJsonToCsv(row.options_json ?? null),
       is_active: Boolean(row.is_active),
     });
+    setEditorOpen(true);
   }
 
-  function clearDraft() {
-    setEditingId(null);
+  function resetForm(defaultActive: boolean) {
     setForm({
       product_id: "",
       label: "",
@@ -184,11 +190,27 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
       is_required: true,
       visibility: "customer_and_agent",
       options_csv: "",
-      is_active: true,
+      is_active: defaultActive,
     });
   }
 
-  async function saveDraft() {
+  function clearDraft() {
+    setEditingId(null);
+    resetForm(true);
+  }
+
+  function openCreateModal() {
+    setEditingId(null);
+    resetForm(true);
+    setEditorOpen(true);
+  }
+
+  function closeEditor() {
+    setEditorOpen(false);
+    clearDraft();
+  }
+
+  async function saveField(nextIsActive: boolean) {
     if (!orgIdNum) return;
     if (!form.product_id) return toast.error("Select product.");
     if (!form.label.trim()) return toast.error("Field label is required.");
@@ -199,7 +221,7 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
       is_required: form.is_required,
       visibility: form.visibility,
       options_json: form.options_csv ? csvToOptionsJson(form.options_csv) : JSON.stringify([]),
-      is_active: form.is_active,
+      is_active: nextIsActive,
     };
 
     setSaving(true);
@@ -217,7 +239,7 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
         toast.success("Custom field created.");
       }
       await load();
-      clearDraft();
+      closeEditor();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save custom field.");
     } finally {
@@ -225,14 +247,19 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
     }
   }
 
-  async function handleDelete(row: CustomField) {
-    if (!window.confirm(`Delete custom field "${row.label}"? This cannot be undone.`)) return;
-    setDeletingId(row.id);
+  async function saveDraft() {
+    await saveField(false);
+  }
+
+  async function handleDelete() {
+    if (!pendingDeleteField) return;
+    setDeletingId(pendingDeleteField.id);
     try {
-      await deleteCustomField(row.id);
-      if (editingId === row.id) clearDraft();
+      await deleteCustomField(pendingDeleteField.id);
+      if (editingId === pendingDeleteField.id) closeEditor();
       await load();
       toast.success("Custom field deleted.");
+      setPendingDeleteField(null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to delete custom field.");
     } finally {
@@ -241,8 +268,8 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
   }
 
   return (
-    <div className="mx-auto max-w-[1300px] min-w-0 space-y-4 pb-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="mx-auto max-w-[1300px] min-w-0 space-y-4 pb-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="mt-1 text-xl font-semibold text-slate-900 dark:text-slate-100">Custom Fields Management</h1>
           <p className="mt-1 max-w-2xl text-xs text-slate-600 dark:text-slate-300">
@@ -250,29 +277,50 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="rounded-2xl border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200"
-          >
-            Export
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              clearDraft();
-              setForm((f) => ({ ...f, field_type: "text" }));
-            }}
-            className="inline-flex items-center gap-1.5 rounded-2xl px-4 py-2 text-xs font-semibold text-white"
-            style={{ backgroundColor: EZII_BRAND.primary }}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Add New Field
-          </button>
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify}
+              onClick={openCreateModal}
+              className="inline-flex items-center gap-1.5 rounded-2xl px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+              style={{ backgroundColor: EZII_BRAND.primary }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Add New Field
+            </button>
+          </InstantTooltip>
         </div>
       </div>
 
-      <div className="grid min-w-0 grid-cols-1 gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <div className="min-w-0 space-y-4">
+      <GlassCard className="border-black/10 bg-white/75 p-2 dark:border-white/10 dark:bg-white/[0.05]">
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setActiveTab("deployed")}
+            className={`rounded-xl px-3 py-1.5 text-xs font-semibold ${
+              activeTab === "deployed"
+                ? "bg-[#1E88E5] text-white"
+                : "text-slate-600 hover:bg-black/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+            }`}
+          >
+            Deployed Fields ({deployedRows.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("drafts")}
+            className={`rounded-xl px-3 py-1.5 text-xs font-semibold ${
+              activeTab === "drafts"
+                ? "bg-[#1E88E5] text-white"
+                : "text-slate-600 hover:bg-black/[0.04] dark:text-slate-300 dark:hover:bg-white/[0.08]"
+            }`}
+          >
+            Save Drafts ({draftRows.length})
+          </button>
+        </div>
+      </GlassCard>
+
+      <div className="grid min-w-0 grid-cols-1 gap-4">
+        <div className="hidden min-w-0 space-y-4">
           <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
             <div className="mb-3 flex items-center justify-between">
               <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Field Library</div>
@@ -325,195 +373,168 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
         </div>
 
         <div className="min-w-0 space-y-4">
-          <GlassCard className="min-w-0 overflow-hidden border-black/10 bg-white/75 p-0 dark:border-white/10 dark:bg-white/[0.05]">
+          <GlassCard className="hidden min-w-0 overflow-hidden border-black/10 bg-white/75 p-0 dark:border-white/10 dark:bg-white/[0.05]">
             <div className="border-b border-black/10 px-4 py-3 dark:border-white/10">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="inline-flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                  <Circle className="h-2.5 w-2.5 fill-[#1E88E5] text-[#1E88E5]" />
                   Active Configuration
                 </div>
                 <div className="flex items-center gap-3 text-[11px]">
                   <button type="button" onClick={clearDraft} className="font-semibold text-slate-500 dark:text-slate-300">
                     Discard
                   </button>
-                  <button
-                    type="button"
-                    onClick={saveDraft}
-                    disabled={saving}
-                    className="font-semibold"
-                    style={{ color: EZII_BRAND.primary }}
-                  >
-                    {saving ? "Saving..." : "Save Draft"}
-                  </button>
+                  <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                    <button
+                      type="button"
+                      onClick={saveDraft}
+                      disabled={!canModify || saving}
+                      className="font-semibold disabled:opacity-60"
+                      style={{ color: EZII_BRAND.primary }}
+                    >
+                      {saving ? "Saving..." : "Save Draft"}
+                    </button>
+                  </InstantTooltip>
                 </div>
               </div>
             </div>
 
             <div className="min-w-0 space-y-4 p-4">
-            <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_220px]">
-              <label className="grid min-w-0 gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Field Label</span>
-                <input
-                  value={form.label}
-                  onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-                  placeholder={activeLibraryItem?.label === "Text Input" ? "e.g., Software Version" : `e.g., ${activeLibraryItem?.label}`}
-                  className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
-                />
-              </label>
-              <div className="grid min-w-0 gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Internal ID</span>
-                <div className="flex items-center justify-between rounded-xl bg-slate-100 px-3 py-2.5 text-xs text-slate-500 ring-1 ring-black/5 dark:bg-white/[0.08] dark:text-slate-300 dark:ring-white/10">
-                  <span className="truncate">{fieldKeyPreview || "software_version"}</span>
-                  <Lock className="h-3.5 w-3.5 shrink-0 opacity-65" />
+              <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
+                <label className="flex min-w-0 self-start flex-col gap-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Field Label</span>
+                  <input
+                    value={form.label}
+                    onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+                    placeholder={activeLibraryItem?.label === "Text Input" ? "e.g., Software Version" : `e.g., ${activeLibraryItem?.label}`}
+                    className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
+                  />
+                </label>
+
+                <div className="space-y-3">
+                  <label className="grid min-w-0 gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Field Type</span>
+                    <select
+                      value={form.field_type}
+                      onChange={(e) => setForm((f) => ({ ...f, field_type: e.target.value as CustomFieldType }))}
+                      className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
+                    >
+                      <option value="text">Text</option>
+                      <option value="textarea">Text Area</option>
+                      <option value="number">Number</option>
+                      <option value="date">Date</option>
+                      <option value="datetime">Date-Time</option>
+                      <option value="dropdown_single">Dropdown (single)</option>
+                      <option value="dropdown_multi">Dropdown (multi)</option>
+                      <option value="checkbox">Checkbox</option>
+                      <option value="file">File Upload</option>
+                    </select>
+                  </label>
+
+                  {form.field_type === "dropdown_single" || form.field_type === "dropdown_multi" ? (
+                    <label className="grid min-w-0 gap-1">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Dropdown Options</span>
+                      <input
+                        value={form.options_csv}
+                        onChange={(e) => setForm((f) => ({ ...f, options_csv: e.target.value }))}
+                        placeholder="e.g., Finance, Operations, Technical"
+                        className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
+                      />
+                    </label>
+                  ) : null}
+                </div>
+
+                <label className="grid min-w-0 self-start gap-0">
+                  <span className="text-[10px] font-bold uppercase leading-none self-start tracking-wide text-slate-500 dark:text-slate-400">Product</span>
+                  <select
+                    value={form.product_id}
+                    onChange={(e) => setForm((f) => ({ ...f, product_id: e.target.value }))}
+                    className="mt-1 min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
+                  >
+                    <option value="">Select product</option>
+                    {products.map((p) => (
+                      <option key={p.id} value={String(p.id)}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold text-[#1E88E5]">Visibility & Permissions</div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/5 dark:bg-white/[0.05] dark:ring-white/10">
+                      <SwitchToggle
+                        className="scale-75 origin-left"
+                        ariaLabel="Customer visible toggle"
+                        checked={form.visibility === "customer_and_agent"}
+                        onChange={(checked) => setForm((f) => ({ ...f, visibility: checked ? "customer_and_agent" : "agent_only" }))}
+                      />
+                      <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                        <span className="block font-semibold text-slate-800 dark:text-slate-100">Customer Visible</span>
+                        Allow users to see this field in the support portal.
+                      </span>
+                    </div>
+                    <div className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/5 dark:bg-white/[0.05] dark:ring-white/10">
+                      <SwitchToggle
+                        className="scale-75 origin-left"
+                        ariaLabel="Agent editable toggle"
+                        checked={form.visibility === "agent_only"}
+                        onChange={(checked) => setForm((f) => ({ ...f, visibility: checked ? "agent_only" : "customer_and_agent" }))}
+                      />
+                      <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                        <span className="block font-semibold text-slate-800 dark:text-slate-100">Agent Editable</span>
+                        Allow agents to modify values during ticket lifecycle.
+                      </span>
+                    </div>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="grid min-w-0 grid-cols-1 gap-3 md:grid-cols-2">
-              <label className="grid min-w-0 gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Product</span>
-                <select
-                  value={form.product_id}
-                  onChange={(e) => setForm((f) => ({ ...f, product_id: e.target.value }))}
-                  className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
-                >
-                  <option value="">Select product</option>
-                  {products.map((p) => (
-                    <option key={p.id} value={String(p.id)}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="grid min-w-0 gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Field Type</span>
-                <select
-                  value={form.field_type}
-                  onChange={(e) => setForm((f) => ({ ...f, field_type: e.target.value as CustomFieldType }))}
-                  className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
-                >
-                  <option value="text">Text</option>
-                  <option value="textarea">Text Area</option>
-                  <option value="number">Number</option>
-                  <option value="date">Date</option>
-                  <option value="datetime">Date-Time</option>
-                  <option value="dropdown_single">Dropdown (single)</option>
-                  <option value="dropdown_multi">Dropdown (multi)</option>
-                  <option value="checkbox">Checkbox</option>
-                  <option value="file">File Upload</option>
-                </select>
-              </label>
-            </div>
-
-            {(form.field_type === "dropdown_single" || form.field_type === "dropdown_multi") ? (
-              <label className="grid min-w-0 gap-1">
-                <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Dropdown Options</span>
-                <input
-                  value={form.options_csv}
-                  onChange={(e) => setForm((f) => ({ ...f, options_csv: e.target.value }))}
-                  placeholder="e.g., Finance, Operations, Technical"
-                  className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
-                />
-              </label>
-            ) : null}
-
-            <div className="space-y-2">
-              <div className="text-xs font-semibold text-[#1E88E5]">Visibility & Permissions</div>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                <label className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/5 dark:bg-white/[0.05] dark:ring-white/10">
-                  <button
-                    type="button"
-                    aria-label="Customer visible toggle"
-                    onClick={() => setForm((f) => ({ ...f, visibility: "customer_and_agent" }))}
-                    className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${
-                      form.visibility === "customer_and_agent" ? "bg-[#1E88E5]" : "bg-slate-300 dark:bg-slate-600"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                        form.visibility === "customer_and_agent" ? "left-[calc(100%-1.1rem)]" : "left-0.5"
-                      }`}
+              <div className="space-y-2">
+                <div className="text-xs font-semibold text-[#1E88E5]">Validation Logic</div>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <label className="flex flex-1 items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/5 dark:bg-white/[0.05] dark:ring-white/10">
+                    <SwitchToggle
+                      className="scale-75 origin-left"
+                      ariaLabel="Mandatory field toggle"
+                      checked={form.is_required}
+                      onChange={(checked) => setForm((f) => ({ ...f, is_required: checked }))}
                     />
-                  </button>
-                  <span className="text-[11px] text-slate-600 dark:text-slate-300">
-                    <span className="block font-semibold text-slate-800 dark:text-slate-100">Customer Visible</span>
-                    Allow users to see this field in the support portal.
-                  </span>
-                </label>
-                <label className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/5 dark:bg-white/[0.05] dark:ring-white/10">
-                  <button
-                    type="button"
-                    aria-label="Agent editable toggle"
-                    onClick={() => setForm((f) => ({ ...f, visibility: "agent_only" }))}
-                    className={`relative mt-0.5 h-5 w-9 shrink-0 rounded-full transition-colors ${
-                      form.visibility === "agent_only" ? "bg-[#1E88E5]" : "bg-slate-300 dark:bg-slate-600"
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all ${
-                        form.visibility === "agent_only" ? "left-[calc(100%-1.1rem)]" : "left-0.5"
-                      }`}
-                    />
-                  </button>
-                  <span className="text-[11px] text-slate-600 dark:text-slate-300">
-                    <span className="block font-semibold text-slate-800 dark:text-slate-100">Agent Editable</span>
-                    Allow agents to modify values during ticket lifecycle.
-                  </span>
-                </label>
-              </div>
-            </div>
+                    <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                      <span className="block font-semibold text-slate-800 dark:text-slate-100">Mandatory Field</span>
+                      Prevent ticket submission if this field is empty.
+                    </span>
+                  </label>
 
-            <div className="space-y-2">
-              <div className="text-xs font-semibold text-[#1E88E5]">Validation Logic</div>
-              <label className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/5 dark:bg-white/[0.05] dark:ring-white/10">
-                <input
-                  type="checkbox"
-                  checked={form.is_required}
-                  onChange={(e) => setForm((f) => ({ ...f, is_required: e.target.checked }))}
-                  className="mt-0.5 h-4 w-4 accent-[#1E88E5]"
-                />
-                <span className="text-[11px] text-slate-600 dark:text-slate-300">
-                  <span className="block font-semibold text-slate-800 dark:text-slate-100">Mandatory Field</span>
-                  Prevent ticket submission if this field is empty.
-                </span>
-                {form.is_required ? (
-                  <span className="ml-auto rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-bold text-red-600 dark:bg-red-500/20 dark:text-red-300">
-                    HIGH PRIORITY
-                  </span>
-                ) : null}
-              </label>
-              <div className="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-[11px] text-slate-400 ring-1 ring-black/5 dark:bg-white/[0.05] dark:text-slate-500 dark:ring-white/10">
-                <CirclePlus className="h-3.5 w-3.5" />
-                Add custom Regex validation...
+                  <div className="flex items-center justify-end gap-2">
+                    <button
+                      type="button"
+                      onClick={clearDraft}
+                      className="rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300"
+                    >
+                      Cancel
+                    </button>
+                    <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                      <button
+                        type="button"
+                        onClick={saveDraft}
+                        disabled={!canModify || saving}
+                        className="rounded-xl px-5 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                        style={{ backgroundColor: EZII_BRAND.primary }}
+                      >
+                        {editingId ? (saving ? "Updating..." : "Update Field") : saving ? "Deploying..." : "Deploy to Production"}
+                      </button>
+                    </InstantTooltip>
+                  </div>
+                </div>
               </div>
-            </div>
 
-            <div className="flex items-center justify-end gap-2 pt-1">
-              <button
-                type="button"
-                onClick={clearDraft}
-                className="rounded-xl px-3.5 py-2 text-xs font-semibold text-slate-600 dark:text-slate-300"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={saveDraft}
-                disabled={saving}
-                className="rounded-xl px-5 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                style={{ backgroundColor: EZII_BRAND.primary }}
-              >
-                {editingId ? (saving ? "Updating..." : "Update Field") : saving ? "Deploying..." : "Deploy to Production"}
-              </button>
-            </div>
             </div>
           </GlassCard>
 
           <div className="relative">
             <GlassCard className="min-w-0 overflow-hidden border-black/10 bg-white/75 p-0 dark:border-white/10 dark:bg-white/[0.05]">
-              <div className="border-b border-black/10 px-4 py-3 dark:border-white/10">
-                <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">Existing Product Fields</div>
-              </div>
+            
               <div className="overflow-x-auto">
                 <table className="min-w-full border-collapse text-xs">
                   <thead className="bg-slate-50/90 dark:bg-white/[0.03]">
@@ -530,14 +551,28 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
                           Loading fields...
                         </td>
                       </tr>
-                    ) : sortedRows.length === 0 ? (
+                    ) : visibleRows.length === 0 ? (
                       <tr>
                         <td colSpan={3} className="px-4 py-8 text-center text-xs text-slate-500 dark:text-slate-400">
-                          No custom fields configured yet.
+                          <div className="space-y-3">
+                            <div>{activeTab === "deployed" ? "No deployed fields yet." : "No saved drafts yet."}</div>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                disabled={!canModify}
+                                onClick={openCreateModal}
+                                className="inline-flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                                style={{ backgroundColor: EZII_BRAND.primary }}
+                              >
+                                <Plus className="h-3.5 w-3.5" />
+                                Add New Field
+                              </button>
+                            </InstantTooltip>
+                          </div>
                         </td>
                       </tr>
                     ) : (
-                      sortedRows.map((r) => (
+                      visibleRows.map((r) => (
                         <tr
                           key={r.id}
                           className="border-t border-black/5 align-top dark:border-white/10"
@@ -549,7 +584,6 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
                               />
                               <div>
                                 <div className="font-semibold text-slate-800 dark:text-slate-100">{r.label}</div>
-                                <div className="mt-0.5 font-mono text-[10px] text-slate-500 dark:text-slate-400">{r.field_key}</div>
                                 {r.options_json ? (
                                   <div className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
                                     {optionsJsonToCsv(r.options_json)}
@@ -565,24 +599,29 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="inline-flex flex-wrap items-center justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => startEdit(r)}
-                                className="inline-flex items-center gap-1 rounded-lg border border-black/10 px-2 py-1 text-[11px] dark:border-white/10"
-                                title="Edit field"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void handleDelete(r)}
-                                disabled={deletingId === r.id}
-                                className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
-                                title="Delete field"
-                                aria-label={`Delete field ${r.label}`}
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
+                              <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                                <button
+                                  type="button"
+                                  disabled={!canModify}
+                                  onClick={() => startEdit(r)}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-black/10 px-2 py-1 text-[11px] disabled:opacity-60 dark:border-white/10"
+                                  title="Edit field"
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
+                              </InstantTooltip>
+                              <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                                <button
+                                  type="button"
+                                  onClick={() => setPendingDeleteField(r)}
+                                  disabled={!canModify || deletingId === r.id}
+                                  className="inline-flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 text-[11px] text-red-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300"
+                                  title="Delete field"
+                                  aria-label={`Delete field ${r.label}`}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </InstantTooltip>
                             </div>
                           </td>
                         </tr>
@@ -592,15 +631,199 @@ export function CustomFieldsPage({ orgId }: { orgId: string }) {
                 </table>
               </div>
             </GlassCard>
-            <button
-              type="button"
-              className="absolute -top-4 left-1/2 -translate-x-1/2 rounded-full bg-[#1E88E5] px-4 py-1.5 text-[10px] font-semibold text-white shadow-[0_8px_20px_rgba(30,136,229,0.35)]"
-            >
-              Publish Configuration
-            </button>
           </div>
         </div>
       </div>
+      {editorOpen && typeof document !== "undefined"
+        ? createPortal(
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/15 dark:bg-[#080D16]/95">
+              <div className="flex items-center justify-between gap-3 border-b border-black/10 px-5 py-4 dark:border-white/10">
+                <div className="text-base font-semibold text-[#111827] dark:text-slate-100">
+                  {editingId ? "Edit Custom Field" : "Create Custom Field"}
+                </div>
+                <button
+                  type="button"
+                  onClick={closeEditor}
+                  aria-label="Close dialog"
+                  className="shrink-0 rounded-lg p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#1E88E5] dark:text-slate-400 dark:hover:bg-white/10 dark:hover:text-slate-100"
+                >
+                  <X className="h-5 w-5" strokeWidth={2} />
+                </button>
+              </div>
+
+              <div className="space-y-4 p-5">
+                <div className="grid min-w-0 grid-cols-1 gap-4 md:grid-cols-2">
+                  <label className="flex min-w-0 self-start flex-col gap-0.5">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Field Label</span>
+                    <input
+                      value={form.label}
+                      onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+                      placeholder="e.g., Software Version"
+                      className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
+                    />
+                  </label>
+                  <label className="grid min-w-0 gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Field Type</span>
+                    <select
+                      value={form.field_type}
+                      onChange={(e) => setForm((f) => ({ ...f, field_type: e.target.value as CustomFieldType }))}
+                      className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
+                    >
+                      <option value="text">Text</option>
+                      <option value="textarea">Text Area</option>
+                      <option value="number">Number</option>
+                      <option value="date">Date</option>
+                      <option value="datetime">Date-Time</option>
+                      <option value="dropdown_single">Dropdown (single)</option>
+                      <option value="dropdown_multi">Dropdown (multi)</option>
+                      <option value="checkbox">Checkbox</option>
+                      <option value="file">File Upload</option>
+                    </select>
+                  </label>
+
+                  <label className="grid min-w-0 self-start gap-0">
+                    <span className="text-[10px] font-bold uppercase leading-none self-start tracking-wide text-slate-500 dark:text-slate-400">Product</span>
+                    <select
+                      value={form.product_id}
+                      onChange={(e) => setForm((f) => ({ ...f, product_id: e.target.value }))}
+                      className="mt-1 min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
+                    >
+                      <option value="">Select product</option>
+                      {products.map((p) => (
+                        <option key={p.id} value={String(p.id)}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div className="space-y-2">
+                    <div className="text-xs font-semibold text-[#1E88E5]">Visibility & Permissions</div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/5 dark:bg-white/[0.05] dark:ring-white/10">
+                        <SwitchToggle
+                          className="scale-75 origin-left"
+                          ariaLabel="Customer visible toggle"
+                          checked={form.visibility === "customer_and_agent"}
+                          onChange={(checked) => setForm((f) => ({ ...f, visibility: checked ? "customer_and_agent" : "agent_only" }))}
+                        />
+                        <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                          <span className="block font-semibold text-slate-800 dark:text-slate-100">Customer Visible</span>
+                          Allow users to see this field in the support portal.
+                        </span>
+                      </div>
+                      <div className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/5 dark:bg-white/[0.05] dark:ring-white/10">
+                        <SwitchToggle
+                          className="scale-75 origin-left"
+                          ariaLabel="Agent editable toggle"
+                          checked={form.visibility === "agent_only"}
+                          onChange={(checked) => setForm((f) => ({ ...f, visibility: checked ? "agent_only" : "customer_and_agent" }))}
+                        />
+                        <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                          <span className="block font-semibold text-slate-800 dark:text-slate-100">Agent Editable</span>
+                          Allow agents to modify values during ticket lifecycle.
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {form.field_type === "dropdown_single" || form.field_type === "dropdown_multi" ? (
+                  <label className="grid min-w-0 gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Dropdown Options</span>
+                    <input
+                      value={form.options_csv}
+                      onChange={(e) => setForm((f) => ({ ...f, options_csv: e.target.value }))}
+                      placeholder="e.g., Finance, Operations, Technical"
+                      className="min-w-0 w-full rounded-xl border-0 bg-slate-100 px-3 py-2.5 text-xs text-slate-800 outline-none ring-1 ring-black/5 focus:ring-2 focus:ring-[#1E88E5]/40 dark:bg-white/[0.08] dark:text-slate-100 dark:ring-white/10"
+                    />
+                  </label>
+                ) : null}
+
+                <div className="flex items-start gap-2 rounded-xl bg-slate-50 px-3 py-2.5 ring-1 ring-black/5 dark:bg-white/[0.05] dark:ring-white/10">
+                  <SwitchToggle
+                    className="scale-75 origin-left"
+                    ariaLabel="Mandatory field toggle"
+                    checked={form.is_required}
+                    onChange={(checked) => setForm((f) => ({ ...f, is_required: checked }))}
+                  />
+                  <span className="text-[11px] text-slate-600 dark:text-slate-300">
+                    <span className="block font-semibold text-slate-800 dark:text-slate-100">Mandatory Field</span>
+                    Prevent ticket submission if this field is empty.
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-black/10 px-5 py-4 dark:border-white/10">
+                <button
+                  type="button"
+                  onClick={closeEditor}
+                  className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button
+                    type="button"
+                    onClick={() => void saveField(false)}
+                    disabled={!canModify || saving}
+                    className="rounded-lg border border-black/10 px-4 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60 dark:border-white/15 dark:text-slate-200"
+                  >
+                    {saving ? "Saving..." : "Save Draft"}
+                  </button>
+                </InstantTooltip>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button
+                    type="button"
+                    onClick={() => void saveField(true)}
+                    disabled={!canModify || saving}
+                    className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    style={{ backgroundColor: EZII_BRAND.primary }}
+                  >
+                    {saving ? "Deploying..." : "Deploy to Production"}
+                  </button>
+                </InstantTooltip>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+        : null}
+
+      {pendingDeleteField && typeof document !== "undefined"
+        ? createPortal(
+          <div className="fixed inset-0 z-[85] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-md overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/15 dark:bg-[#080D16]/95">
+              <div className="border-b border-black/10 px-5 py-4 dark:border-white/10">
+                <div className="text-base font-semibold text-[#111827] dark:text-slate-100">Delete Custom Field?</div>
+                <div className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                  Are you sure you want to delete <span className="font-semibold">{pendingDeleteField.label}</span>? This action cannot be undone.
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-2 px-5 py-4">
+                <button
+                  type="button"
+                  onClick={() => setPendingDeleteField(null)}
+                  disabled={deletingId === pendingDeleteField.id}
+                  className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60 dark:text-slate-300"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleDelete()}
+                  disabled={deletingId === pendingDeleteField.id}
+                  className="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {deletingId === pendingDeleteField.id ? "Deleting..." : "Delete Field"}
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+        : null}
     </div>
   );
 }

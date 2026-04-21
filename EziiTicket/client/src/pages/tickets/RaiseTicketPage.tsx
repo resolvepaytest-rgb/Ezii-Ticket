@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { GlassCard } from "@components/common/GlassCard";
+import { InstantTooltip } from "@components/common/InstantTooltip";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import {
   createTicket,
   listTicketFormCategories,
@@ -41,6 +43,8 @@ export function RaiseTicketPage({ onCreated }: RaiseTicketPageProps) {
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [parsedPreviews, setParsedPreviews] = useState<Record<string, ParsedFilePreview>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const canModify = useScreenModifyAccess("raise_a_ticket");
+  const modifyAccessMessage = "You don't have modify access";
 
   useEffect(() => {
     let cancelled = false;
@@ -531,17 +535,20 @@ export function RaiseTicketPage({ onCreated }: RaiseTicketPageProps) {
             </div>
 
             <div className="flex items-center justify-end">
-              <button
-                type="submit"
-                disabled={
-                  isSubmitting ||
-                  productId === "" ||
-                  (categories.length > 0 && categoryId === "")
-                }
-                className="rounded-lg bg-[#0F5EA8] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
-              >
-                {isSubmitting ? "Creating..." : "Create Ticket"}
-              </button>
+              <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                <button
+                  type="submit"
+                  disabled={
+                    !canModify ||
+                    isSubmitting ||
+                    productId === "" ||
+                    (categories.length > 0 && categoryId === "")
+                  }
+                  className="rounded-lg bg-[#0F5EA8] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {isSubmitting ? "Creating..." : "Create Ticket"}
+                </button>
+              </InstantTooltip>
             </div>
           </form>
         )}

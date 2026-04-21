@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { pool } from "../../db/pool.js";
 import { asInt } from "./adminUtils.js";
 import { appendAdminAudit } from "./adminAudit.js";
+import { seedKeywordRoutingForOrg } from "../../services/keywordRoutingSeed.js";
 
 export type KeywordRoutingEntryRow = {
   id: number;
@@ -20,6 +21,11 @@ export type KeywordRoutingEntryRow = {
 export async function listKeywordRouting(req: Request, res: Response) {
   const orgId = asInt(req.query.organisation_id);
   if (!orgId) return res.status(400).json({ ok: false, error: "organisation_id is required" });
+
+  const orgRow = await pool.query(`select 1 from organisations where id = $1`, [orgId]);
+  if (orgRow.rowCount && orgRow.rowCount > 0) {
+    await seedKeywordRoutingForOrg(orgId);
+  }
 
   const result = await pool.query<KeywordRoutingEntryRow>(
     `select k.id,

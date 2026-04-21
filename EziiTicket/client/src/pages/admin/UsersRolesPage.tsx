@@ -1,15 +1,14 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
 import { toast } from "sonner";
 import {
-  createDesignation,
   createUser,
   getUserDesignation,
   getExternalOrganizations,
   listDesignations,
   listOrganisationUserDirectory,
-  listUserPermissionOverrides,
   listRoles,
   listUserRoles,
   listUserScopeOrg,
@@ -26,6 +25,7 @@ import {
   type UserDesignation,
   type UserScopeOrg,
 } from "@api/adminApi";
+import { getAuthMePermissions } from "@api/authApi";
 import { useAuthStore } from "@store/useAuthStore";
 import { EZII_BRAND } from "@/lib/eziiBrand";
 import { ChevronDown, ChevronUp, Search, UserPlus, X } from "lucide-react";
@@ -35,8 +35,8 @@ type InviteState = {
   query: string;
   selectedUserIds: number[];
   selectedRoleId: number | null;
-  /** For Ezii → tenant invite: one of LEVEL_SLUGS; role is always Customer in the tenant */
-  selectedLevelSlug: string;
+  /** For Ezii → tenant invite: one of LEVEL_KEYS; role is always Agent in the tenant */
+  selectedLevelKey: string;
   saving: boolean;
 };
 
@@ -57,40 +57,75 @@ type UserTableRow = {
   /** From `user_scope_org` when present */
   originOrgId?: number | null;
   scopeOrgId?: number | null;
-  /** Support tier (l1/l2/l3) from `user_designation` when name matches */
+  /** Support tier (L1/L2/L3) from `user_org_support_levels` */
   levelLabel?: string;
 };
 
-const LEVEL_SLUGS = ["l1_agent", "l2_specialist", "l3_engineer"] as const;
+const LEVEL_KEYS = ["l1", "l2", "l3"] as const;
 
-function levelSlugFromDesignationName(name: string | null | undefined): string {
+function normalizeLevelKey(name: string | null | undefined): string {
   if (!name) return "";
   const n = name.trim().toLowerCase();
-  for (const s of LEVEL_SLUGS) {
-    if (s === n) return s;
-  }
+  if (n === "l1" || n === "l1_agent") return "l1";
+  if (n === "l2" || n === "l2_specialist") return "l2";
+  if (n === "l3" || n === "l3_engineer") return "l3";
   return "";
 }
 
-/** Routing tier from `user_org_support_levels` / org_support_levels (not from ticket role). */
-function tierSlugFromUserDesignation(d: UserDesignation | null | undefined): string {
-  return levelSlugFromDesignationName(d?.support_level_name ?? d?.designation_name);
+function levelLabelFromKey(key: string | null | undefined): string {
+  if (key === "l1") return "L1";
+  if (key === "l2") return "L2";
+  if (key === "l3") return "L3";
+  return "—";
 }
 
-type EffectiveAccessPreview = {
-  userId: number;
-  userName: string;
-  roleName: string;
-  levelName: string | null;
-  permissionsJson: Record<string, unknown>;
-  overrideCount: number;
-};
+function supportLevelIdFromKey(designations: Designation[], key: string): number | null {
+  const match = designations.find((d) => {
+    const candidates = [normalizeLevelKey(d.code), normalizeLevelKey(d.name)];
+    return candidates.includes(key);
+  });
+  return match?.id ?? null;
+}
+
+function isLegacyLevelRoleName(name: string | null | undefined): boolean {
+  const n = String(name ?? "").trim().toLowerCase();
+  return n === "l1_agent" || n === "l2_specialist" || n === "l3_engineer";
+}
+
+/** Routing tier from `user_org_support_levels` / org_support_levels (not from ticket role). */
+function tierKeyFromUserDesignation(d: UserDesignation | null | undefined): string {
+  return normalizeLevelKey(
+    d?.support_level_code ?? d?.support_level_name ?? d?.designation_code ?? d?.designation_name
+  );
+}
+
 
 function isEziiInvitedSectionRow(row: UserTableRow): boolean {
   return (
     row.originOrgId === 1 &&
     row.scopeOrgId != null &&
     Number.isFinite(Number(row.scopeOrgId))
+  );
+}
+
+function ModifyAccessGuard({
+  disabled,
+  message,
+  children,
+}: {
+  disabled: boolean;
+  message: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`relative inline-flex ${disabled ? "group" : ""}`}>
+      {children}
+      {disabled ? (
+        <span className="pointer-events-none absolute -top-8 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-md bg-[#111827] px-2 py-1 text-[10px] font-medium text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover:opacity-100">
+          {message}
+        </span>
+      ) : null}
+    </div>
   );
 }
 
@@ -143,17 +178,18 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
   const [customerExpanded, setCustomerExpanded] = useState(false);
   const [invitedExpanded, setInvitedExpanded] = useState(false);
   const [bulkApplying, setBulkApplying] = useState(false);
-  const [preview, setPreview] = useState<EffectiveAccessPreview | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
+  const [usersScreenAccess, setUsersScreenAccess] = useState<{ view: boolean; modify: boolean } | null>(null);
 
   const [invite, setInvite] = useState<InviteState>({
     open: false,
     query: "",
     selectedUserIds: [],
     selectedRoleId: null,
-    selectedLevelSlug: "",
+    selectedLevelKey: "",
     saving: false,
   });
+  const [removeConfirmRow, setRemoveConfirmRow] = useState<UserTableRow | null>(null);
+  const [removeSubmitting, setRemoveSubmitting] = useState(false);
 
   useEffect(() => {
     if (!orgIdNumFromShell) return;
@@ -175,11 +211,32 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     };
   }, [isSystemAdminUser]);
 
+  useEffect(() => {
+    let cancelled = false;
+    void getAuthMePermissions()
+      .then((data) => {
+        if (cancelled) return;
+        const usersAccess = data.permissions_json?.screen_access?.users;
+        const view = Boolean(usersAccess?.view || usersAccess?.modify);
+        const modify = Boolean(usersAccess?.modify);
+        setUsersScreenAccess({ view, modify });
+      })
+      .catch(() => {
+        if (!cancelled) setUsersScreenAccess(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const canModifyUsersScreen = isSystemAdminUser || Boolean(usersScreenAccess?.modify);
+  const modifyDisabledTitle = "You don't have modify access";
+
   async function loadPageData(targetOrgId: number) {
     setLoading(true);
     setError(null);
     try {
-      const sourceOrgId = isSystemAdminUser && targetOrgId !== 1 ? 1 : targetOrgId;
+      const sourceOrgId = targetOrgId !== 1 ? 1 : targetOrgId;
       const [rolesRes, designationsRes, targetUsersRes, sourceUsersRes, scopedRes, directoryBundle] = await Promise.all([
         listRoles(targetOrgId),
         listDesignations(targetOrgId).catch(() => [] as Designation[]),
@@ -193,6 +250,16 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
           }))
           : Promise.resolve({ users: [] as OrgDirectoryUser[], has_local_users: true }),
       ]);
+      const targetOrgRoleIds = new Set<number>(
+        rolesRes
+          .map((r) => Number(r.id))
+          .filter((id) => Number.isFinite(id))
+      );
+      const targetOrgRoleNameById = new Map<number, string>(
+        rolesRes
+          .filter((r) => Number.isFinite(Number(r.id)))
+          .map((r) => [Number(r.id), String(r.name ?? "").trim()])
+      );
       setRoles(rolesRes);
       setDesignations(designationsRes);
       setUsers(targetUsersRes);
@@ -217,12 +284,21 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                 getUserDesignation(uid, targetOrgId).catch(() => null),
               ]);
               const scoped = list.find((r) => Number(r.scope_organisation_id) === targetOrgId);
-              const global = list.find((r) => r.scope_organisation_id == null);
+              const global = list.find(
+                (r) =>
+                  r.scope_organisation_id == null &&
+                  targetOrgRoleIds.has(Number(r.role_id))
+              );
               const chosen = scoped ?? global ?? null;
+              const chosenRoleId = chosen?.role_id ? Number(chosen.role_id) : null;
+              const chosenRoleName =
+                chosenRoleId != null
+                  ? (targetOrgRoleNameById.get(chosenRoleId) ?? chosen?.role_name ?? "")
+                  : "";
               return {
                 uid,
-                roleName: chosen?.role_name ?? "",
-                roleId: chosen?.role_id ? Number(chosen.role_id) : null,
+                roleName: chosenRoleName,
+                roleId: chosenRoleId,
                 designation: designation,
               } as const;
             } catch {
@@ -261,6 +337,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         if (p.roleName) mergedNames[p.uid] = p.roleName;
         if (p.roleId != null && Number.isFinite(p.roleId)) mergedIds[p.uid] = p.roleId;
         designationMap[p.uid] = p.designation;
+
       }
 
       setAssignedRoleByUserId(mergedNames);
@@ -302,25 +379,38 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     const fromExternal = externalOrgs.find((o) => Number(o.id) === activeOrgId)?.organization_name;
     if (fromExternal) return fromExternal;
     if (activeOrgId === 1) return "Resolve Biz Services Pvt Ltd";
-    return `Organization ${activeOrgId}`;
+    return "";
   }, [activeOrgId, externalOrgs]);
 
-  const defaultCustomerRoleId = useMemo(() => {
-    const c = roles.find((r) => String(r.name ?? "").toLowerCase() === "customer");
-    return c?.id ?? roles[0]?.id ?? null;
+  /** Label for the shell org row in the system-admin org dropdown — must not follow `activeOrgId` or org 1 “disappears” when another org is selected. */
+  const shellOrgDropdownLabel = useMemo(() => {
+    if (!orgIdNumFromShell) return "Organization";
+    const fromExternal = externalOrgs.find((o) => Number(o.id) === orgIdNumFromShell)?.organization_name;
+    if (fromExternal) return fromExternal;
+    if (orgIdNumFromShell === 1) return "Resolve Biz Services Pvt Ltd";
+    return `Organization ${orgIdNumFromShell}`;
+  }, [orgIdNumFromShell, externalOrgs]);
+
+  const assignableRoles = useMemo(
+    () => roles.filter((r) => !isLegacyLevelRoleName(r.name)),
+    [roles]
+  );
+  const assignableRoleIdSet = useMemo(
+    () =>
+      new Set(
+        assignableRoles
+          .map((r) => Number(r.id))
+          .filter((id) => Number.isFinite(id))
+      ),
+    [assignableRoles]
+  );
+
+  const defaultAgentRoleId = useMemo(() => {
+    const role = roles.find((r) => String(r.name ?? "").trim().toLowerCase() === "agent");
+    return role?.id ?? null;
   }, [roles]);
 
-  const requiredInvitedEziiRole = useMemo(() => {
-    const roleBySlug = (slug: string) =>
-      roles.find((r) => String(r.name ?? "").trim().toLowerCase() === slug)?.id ?? null;
-
-    const l1Id = roleBySlug("l1_agent");
-    const l2Id = roleBySlug("l2_specialist");
-    const l3Id = roleBySlug("l3_engineer");
-    return { l1Id, l2Id, l3Id };
-  }, [roles]);
-
-  /** At least one Ezii-invited user per routing tier. Tier lives on org support level, not ticket_role (invite uses Customer). */
+  /** At least one Ezii-invited user per routing tier. Tier lives on org support level, not ticket role. */
   const missingInvitedEziiRoles = useMemo(() => {
     if (!isSystemAdminUser || activeOrgId == null || activeOrgId === 1) return [] as string[];
 
@@ -333,24 +423,33 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
 
     const tierSlugs = new Set<string>();
     for (const s of activeInvitedScopes) {
-      const slug = tierSlugFromUserDesignation(assignedDesignationByUserId[Number(s.user_id)]);
+      const slug = tierKeyFromUserDesignation(assignedDesignationByUserId[Number(s.user_id)]);
       if (slug) tierSlugs.add(slug);
     }
 
     const missing: string[] = [];
-    if (!tierSlugs.has("l1_agent")) missing.push("L1");
-    if (!tierSlugs.has("l2_specialist")) missing.push("L2");
-    if (!tierSlugs.has("l3_engineer")) missing.push("L3");
+    if (!tierSlugs.has("l1")) missing.push("L1");
+    if (!tierSlugs.has("l2")) missing.push("L2");
+    if (!tierSlugs.has("l3")) missing.push("L3");
     return missing;
   }, [isSystemAdminUser, activeOrgId, scopeRows, assignedDesignationByUserId]);
 
-  const recommendedInviteRoleId = useMemo(() => {
-    if (!isSystemAdminUser || activeOrgId == null || activeOrgId === 1) return defaultCustomerRoleId;
-    if (missingInvitedEziiRoles.includes("L1") && requiredInvitedEziiRole.l1Id != null) return requiredInvitedEziiRole.l1Id;
-    if (missingInvitedEziiRoles.includes("L2") && requiredInvitedEziiRole.l2Id != null) return requiredInvitedEziiRole.l2Id;
-    if (missingInvitedEziiRoles.includes("L3") && requiredInvitedEziiRole.l3Id != null) return requiredInvitedEziiRole.l3Id;
-    return defaultCustomerRoleId;
-  }, [isSystemAdminUser, activeOrgId, missingInvitedEziiRoles, requiredInvitedEziiRole, defaultCustomerRoleId]);
+  const recommendedInviteRoleId = useMemo(() => defaultAgentRoleId, [defaultAgentRoleId]);
+
+  const levelOptions = useMemo(() => {
+    const fromBackend = designations
+      .map((d) => {
+        const key = normalizeLevelKey(d.code ?? d.name);
+        if (!key) return null;
+        return {
+          key,
+          label: String(d.name ?? d.code ?? levelLabelFromKey(key)),
+        };
+      })
+      .filter((option): option is { key: string; label: string } => option != null);
+    if (fromBackend.length > 0) return fromBackend;
+    return LEVEL_KEYS.map((key) => ({ key, label: levelLabelFromKey(key) }));
+  }, [designations]);
 
   const departmentByUserId = useMemo(() => {
     const m: Record<number, string> = {};
@@ -381,7 +480,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
           department: d.department ?? null,
           originOrgId: d.origin_org_id ?? null,
           scopeOrgId: d.scope_org_id ?? null,
-          levelLabel: tierSlugFromUserDesignation(assignedDesignationByUserId[d.user_id]) || "—",
+          levelLabel: levelLabelFromKey(tierKeyFromUserDesignation(assignedDesignationByUserId[d.user_id])),
         }))
         : isSystemAdminUser && activeOrgId !== 1
           ? scopeRows.map((r) => ({
@@ -395,8 +494,8 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
             department: departmentByUserId[Number(r.user_id)] ?? null,
             originOrgId: Number(r.origin_org_id),
             scopeOrgId: Number(r.scope_org_id),
-            levelLabel:
-              tierSlugFromUserDesignation(assignedDesignationByUserId[Number(r.user_id)]) || "—",
+              levelLabel:
+                levelLabelFromKey(tierKeyFromUserDesignation(assignedDesignationByUserId[Number(r.user_id)])),
           }))
           : (() => {
             const byUserId = new Map<number, UserTableRow>();
@@ -415,7 +514,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                     : null) ?? departmentByUserId[uid] ?? null,
                 originOrgId: sc != null ? Number(sc.origin_org_id) : null,
                 scopeOrgId: sc != null ? Number(sc.scope_org_id) : null,
-                levelLabel: tierSlugFromUserDesignation(assignedDesignationByUserId[uid]) || "—",
+                levelLabel: levelLabelFromKey(tierKeyFromUserDesignation(assignedDesignationByUserId[uid])),
               });
             }
             // For org-admin/other non-system roles, keep invited Ezii users visible even when
@@ -432,7 +531,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                 department: departmentByUserId[uid] ?? null,
                 originOrgId: Number(sc.origin_org_id),
                 scopeOrgId: Number(sc.scope_org_id),
-                levelLabel: tierSlugFromUserDesignation(assignedDesignationByUserId[uid]) || "—",
+                levelLabel: levelLabelFromKey(tierKeyFromUserDesignation(assignedDesignationByUserId[uid])),
               });
             }
             return Array.from(byUserId.values());
@@ -539,7 +638,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
       const uid = Number(rawUid);
       if (!Number.isFinite(uid)) continue;
       const draftLevel = rowLevelMap[uid] ?? "";
-      const currentLevel = tierSlugFromUserDesignation(assignedDesignationByUserId[uid]) ?? "";
+      const currentLevel = tierKeyFromUserDesignation(assignedDesignationByUserId[uid]) ?? "";
       if (draftLevel !== currentLevel) ids.add(uid);
     }
     return Array.from(ids);
@@ -556,8 +655,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
   }, [invitedPage, invitedTotalPages]);
 
   /** System admin viewing a tenant org — invite Ezii (org 1) users only, not the tenant's local user table */
-  const customerOrgInviteMode =
-    isSystemAdminUser && activeOrgId != null && activeOrgId !== 1;
+  const customerOrgInviteMode = activeOrgId != null && activeOrgId !== 1;
 
   const inviteCandidates = useMemo(() => {
     const q = invite.query.trim().toLowerCase();
@@ -606,104 +704,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     return rows;
   }, [sourceUsers, directoryUsers, users, invite.query, customerOrgInviteMode]);
 
-  const roleById = useMemo(() => {
-    const map = new Map<number, Role>();
-    for (const r of roles) map.set(Number(r.id), r);
-    return map;
-  }, [roles]);
 
-  function asObj(v: unknown): Record<string, unknown> {
-    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
-  }
-
-  function bool(v: unknown) {
-    return Boolean(v);
-  }
-
-  function mergePermissions(base: Record<string, unknown>, extra: Record<string, unknown>) {
-    const b = asObj(base);
-    const e = asObj(extra);
-    const out: Record<string, unknown> = {
-      ...b,
-      ...e,
-      can_assign: bool(b.can_assign) || bool(e.can_assign),
-      can_resolve: bool(b.can_resolve) || bool(e.can_resolve),
-    };
-    const bScreen = asObj(b.screen_access);
-    const eScreen = asObj(e.screen_access);
-    const keys = new Set<string>([...Object.keys(bScreen), ...Object.keys(eScreen)]);
-    const screen: Record<string, { view: boolean; modify: boolean }> = {};
-    for (const key of keys) {
-      const bs = asObj(bScreen[key]);
-      const es = asObj(eScreen[key]);
-      const modify = bool(bs.modify) || bool(es.modify);
-      const view = bool(bs.view) || bool(es.view) || modify;
-      screen[key] = { view, modify };
-    }
-    out.screen_access = screen;
-    return out;
-  }
-
-  function applyOverrides(
-    base: Record<string, unknown>,
-    overrides: Array<{ permission_key: string; effect: "allow" | "deny" }>
-  ) {
-    const out = JSON.parse(JSON.stringify(base)) as Record<string, unknown>;
-    for (const ov of overrides) {
-      const path = String(ov.permission_key ?? "").trim();
-      if (!path) continue;
-      const parts = path.split(".").filter(Boolean);
-      if (!parts.length) continue;
-      let ptr = out;
-      for (let i = 0; i < parts.length - 1; i++) {
-        const k = parts[i];
-        const node = ptr[k];
-        if (!node || typeof node !== "object" || Array.isArray(node)) ptr[k] = {};
-        ptr = ptr[k] as Record<string, unknown>;
-      }
-      ptr[parts[parts.length - 1]] = ov.effect === "allow";
-    }
-    return out;
-  }
-
-  async function openPreview(row: UserTableRow) {
-    if (!activeOrgId) return;
-    const selectedRoleId =
-      rowRoleMap[row.user_id] ??
-      assignedRoleIdByUserId[row.user_id] ??
-      null;
-    const role = selectedRoleId ? roleById.get(Number(selectedRoleId)) ?? null : null;
-    const selectedLevelSlug =
-      rowLevelMap[row.user_id] !== undefined
-        ? rowLevelMap[row.user_id]!
-        : tierSlugFromUserDesignation(assignedDesignationByUserId[row.user_id]);
-    const levelRole =
-      selectedLevelSlug && selectedLevelSlug !== ""
-        ? roles.find((r) => String(r.name ?? "").trim().toLowerCase() === selectedLevelSlug.toLowerCase()) ?? null
-        : null;
-
-    setPreviewLoading(true);
-    try {
-      const overrides = await listUserPermissionOverrides(row.user_id, activeOrgId).catch(() => []);
-      const rolePerms = asObj(role?.permissions_json);
-      const levelPerms = asObj(levelRole?.permissions_json);
-      const merged = mergePermissions(rolePerms, levelPerms);
-      const finalPerms = applyOverrides(
-        merged,
-        overrides.map((o) => ({ permission_key: o.permission_key, effect: o.effect }))
-      );
-      setPreview({
-        userId: row.user_id,
-        userName: row.name,
-        roleName: role?.name ?? row.assignedRoleLabel ?? "—",
-        levelName: selectedLevelSlug ? selectedLevelSlug : null,
-        permissionsJson: finalPerms,
-        overrideCount: overrides.length,
-      });
-    } finally {
-      setPreviewLoading(false);
-    }
-  }
 
   function getStatusPillClass(status: string) {
     const s = status.toLowerCase();
@@ -723,18 +724,28 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     selected: Pick<User, "user_id" | "organisation_id" | "name" | "email" | "phone" | "user_type" | "status"> | null,
     targetOrgId: number
   ) {
-    const scopedMode = isSystemAdminUser && targetOrgId !== 1;
+    const scopedMode =
+      isSystemAdminUser &&
+      targetOrgId !== 1 &&
+      selected != null &&
+      Number(selected.organisation_id) === 1;
     const createInOrgId = scopedMode ? 1 : targetOrgId;
     if (selected && Number(selected.organisation_id) !== createInOrgId) {
-      await createUser({
-        user_id: Number(selected.user_id),
-        organisation_id: createInOrgId,
-        name: selected.name,
-        email: selected.email,
-        phone: selected.phone ?? null,
-        user_type: selected.user_type ?? null,
-        status: selected.status,
-      });
+      try {
+        await createUser({
+          user_id: Number(selected.user_id),
+          organisation_id: createInOrgId,
+          name: selected.name,
+          email: selected.email,
+          phone: selected.phone ?? null,
+          user_type: selected.user_type ?? null,
+          status: selected.status,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "";
+        // User may already exist under a different org mapping; continue with role/scope assignment.
+        if (!msg.toLowerCase().includes("already exists")) throw e;
+      }
     }
     return {
       userId,
@@ -749,11 +760,11 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     const eziiToTenantInvite = customerOrgInviteMode;
 
     if (eziiToTenantInvite) {
-      const slug = invite.selectedLevelSlug.trim();
-      if (!slug || !LEVEL_SLUGS.includes(slug as (typeof LEVEL_SLUGS)[number])) {
+      const levelKey = invite.selectedLevelKey.trim();
+      if (!levelKey || !LEVEL_KEYS.includes(levelKey as (typeof LEVEL_KEYS)[number])) {
         return toast.error("Select a level (L1 / L2 / L3)");
       }
-      if (defaultCustomerRoleId == null) return toast.error("Customer role not found for this organization.");
+      if (defaultAgentRoleId == null) return toast.error("Agent role not found for this organization.");
     } else {
       if (!invite.selectedRoleId) return toast.error("Select a role");
     }
@@ -761,22 +772,15 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     setInvite((prev) => ({ ...prev, saving: true }));
     try {
       let processed = 0;
-      /** One shared level row per org+slug — must not create inside the per-user loop (state is stale; 2nd+ insert hits unique constraint). */
       let inviteBatchSupportLevelId: number | null = null;
       if (eziiToTenantInvite) {
-        const slug = invite.selectedLevelSlug.trim() as (typeof LEVEL_SLUGS)[number];
-        const existing = designations.find(
-          (d) => String(d.name ?? "").trim().toLowerCase() === slug.toLowerCase()
+        inviteBatchSupportLevelId = supportLevelIdFromKey(
+          designations,
+          invite.selectedLevelKey.trim() as (typeof LEVEL_KEYS)[number]
         );
-        inviteBatchSupportLevelId = existing
-          ? existing.id
-          : (
-            await createDesignation({
-              organisation_id: activeOrgId,
-              name: slug,
-              code: slug.toUpperCase().replace(/\s+/g, "_"),
-            })
-          ).id;
+        if (inviteBatchSupportLevelId == null) {
+          throw new Error("Level options are not configured for this organization.");
+        }
       }
 
       for (const selectedUserId of invite.selectedUserIds) {
@@ -790,15 +794,16 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
           selectedUser,
           activeOrgId
         );
+        const inviteScopeOrgId = eziiToTenantInvite ? activeOrgId : resolved.scopeOrgId;
 
         if (eziiToTenantInvite) {
-          await setUserRoles(resolved.userId, [defaultCustomerRoleId!], resolved.scopeOrgId);
+          await setUserRoles(resolved.userId, [defaultAgentRoleId!], inviteScopeOrgId);
           await setUserDesignation(resolved.userId, {
             support_level_id: inviteBatchSupportLevelId!,
             organisation_id: activeOrgId,
           });
         } else {
-          await setUserRoles(resolved.userId, [invite.selectedRoleId!], resolved.scopeOrgId);
+          await setUserRoles(resolved.userId, [invite.selectedRoleId!], inviteScopeOrgId);
         }
         processed += 1;
       }
@@ -813,7 +818,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         query: "",
         selectedUserIds: [],
         selectedRoleId: null,
-        selectedLevelSlug: "",
+        selectedLevelKey: "",
         saving: false,
       });
       await loadPageData(activeOrgId);
@@ -842,14 +847,11 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     if (!activeOrgId || pendingChangesCount === 0) return;
     setBulkApplying(true);
     try {
-      const designationIdBySlug = new Map<string, number>(
-        designations.map((d) => [String(d.name ?? "").trim().toLowerCase(), Number(d.id)])
-      );
       let appliedUsers = 0;
       for (const uid of pendingChangeUserIds) {
         const source =
-          sourceUsers.find((u) => Number(u.user_id) === uid) ??
           users.find((u) => Number(u.user_id) === uid) ??
+          sourceUsers.find((u) => Number(u.user_id) === uid) ??
           null;
         if (!source) continue;
         const resolved = await ensureUserExistsForTarget(uid, source, activeOrgId);
@@ -857,28 +859,35 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
 
         const draftRoleId = rowRoleMap[uid];
         const currentRoleId = assignedRoleIdByUserId[uid] ?? null;
-        if (draftRoleId != null && draftRoleId !== currentRoleId) {
-          await setUserRoles(resolved.userId, [draftRoleId], resolved.scopeOrgId);
+        const normalizedDraftRoleId =
+          draftRoleId != null && assignableRoleIdSet.has(Number(draftRoleId))
+            ? Number(draftRoleId)
+            : null;
+        if (
+          normalizedDraftRoleId != null &&
+          (!assignableRoleIdSet.has(Number(currentRoleId)) || normalizedDraftRoleId !== currentRoleId)
+        ) {
+          const rowScopeOrgId = visibleRows.find((r) => Number(r.user_id) === uid)?.scopeOrgId;
+          let effectiveScopeOrgId: number | undefined;
+          if (activeOrgId === 1) {
+            // Prevent backend scope inference from picking another org (e.g. tenant scoped role).
+            effectiveScopeOrgId = 1;
+          } else if (rowScopeOrgId != null && Number.isFinite(Number(rowScopeOrgId))) {
+            effectiveScopeOrgId = Number(rowScopeOrgId);
+          } else {
+            effectiveScopeOrgId = resolved.scopeOrgId;
+          }
+          await setUserRoles(resolved.userId, [normalizedDraftRoleId], effectiveScopeOrgId);
           userChanged = true;
         }
 
         if (rowLevelMap[uid] !== undefined) {
           const draftLevel = (rowLevelMap[uid] ?? "").trim();
-          let resolvedDesignationId: number | null = null;
-          if (draftLevel) {
-            const key = draftLevel.toLowerCase();
-            const existingId = designationIdBySlug.get(key);
-            if (existingId != null) {
-              resolvedDesignationId = existingId;
-            } else {
-              const created = await createDesignation({
-                organisation_id: activeOrgId,
-                name: draftLevel,
-                code: draftLevel.toUpperCase().replace(/\s+/g, "_"),
-              });
-              resolvedDesignationId = created.id;
-              designationIdBySlug.set(key, created.id);
-            }
+          const resolvedDesignationId = draftLevel
+            ? supportLevelIdFromKey(designations, draftLevel)
+            : null;
+          if (draftLevel && resolvedDesignationId == null) {
+            throw new Error(`Level "${draftLevel}" is not configured for this organization.`);
           }
           const currentDesignationId = assignedDesignationByUserId[uid]?.designation_id ?? null;
           if (resolvedDesignationId !== currentDesignationId) {
@@ -903,6 +912,42 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     } finally {
       setBulkApplying(false);
     }
+  }
+
+  function handleApplyRowSelectionToAll(row: UserTableRow) {
+    const selectedRoleId =
+      rowRoleMap[row.user_id] ??
+      assignedRoleIdByUserId[row.user_id] ??
+      null;
+    const persistedLevel = tierKeyFromUserDesignation(assignedDesignationByUserId[row.user_id]);
+    const selectedLevel =
+      rowLevelMap[row.user_id] !== undefined ? rowLevelMap[row.user_id] ?? "" : persistedLevel;
+
+    if (selectedRoleId == null && !selectedLevel) {
+      toast.error("Select a role or level first.");
+      return;
+    }
+
+    if (selectedRoleId != null) {
+      const nextRoleMap: Record<number, number | null> = {};
+      for (const targetRow of visibleRows) {
+        nextRoleMap[targetRow.user_id] = selectedRoleId;
+      }
+      setRowRoleMap((prev) => ({ ...prev, ...nextRoleMap }));
+    }
+
+    const nextLevelMap: Record<number, string | undefined> = {};
+    if (selectedLevel) {
+      for (const targetRow of visibleRows) {
+        const canEditTargetLevel =
+          activeOrgId == null || activeOrgId === 1 ? true : isEziiInvitedSectionRow(targetRow);
+        if (!canEditTargetLevel) continue;
+        nextLevelMap[targetRow.user_id] = selectedLevel;
+      }
+      setRowLevelMap((prev) => ({ ...prev, ...nextLevelMap }));
+    }
+
+    toast.success("Copied selected role/level to all users. Click Apply Changes to save.");
   }
 
   function sectionHeadingRow(
@@ -1001,17 +1046,16 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
   }
 
   function renderUserTableRow(row: UserTableRow) {
-    const currentDesignationId = assignedDesignationByUserId[row.user_id]?.designation_id ?? null;
     const canEditLevel =
       activeOrgId == null || activeOrgId === 1 ? true : isEziiInvitedSectionRow(row);
     const selectedRoleId =
       rowRoleMap[row.user_id] ??
       assignedRoleIdByUserId[row.user_id] ??
       null;
-    const persistedLevel = tierSlugFromUserDesignation(assignedDesignationByUserId[row.user_id]);
-    const selectedLevelSlug =
+    const persistedLevel = tierKeyFromUserDesignation(assignedDesignationByUserId[row.user_id]);
+    const selectedLevelKey =
       rowLevelMap[row.user_id] !== undefined ? rowLevelMap[row.user_id]! : persistedLevel;
-    const showRemove = isEziiInvitedSectionRow(row);
+    const showRemove = activeOrgId != null && activeOrgId !== 1 && isEziiInvitedSectionRow(row);
     return (
       <tr key={row.user_id} className="border-b border-black/5 dark:border-white/5">
         <td className="px-5 py-4">
@@ -1043,109 +1087,89 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         <td className="px-5 py-4">
           {canEditLevel ? (
             <div className="flex items-center gap-2">
-              <select
-                value={selectedLevelSlug}
-                onChange={(e) => {
-                  const nextLevel = e.target.value;
-                  setRowLevelMap((prev) => ({
-                    ...prev,
-                    [row.user_id]: nextLevel,
-                  }));
-                  if (!isEziiInvitedSectionRow(row) || !nextLevel) return;
-                  const matchedRole = roles.find(
-                    (r) => String(r.name ?? "").trim().toLowerCase() === nextLevel.trim().toLowerCase()
-                  );
-                  if (!matchedRole?.id) return;
-                  setRowRoleMap((prev) => ({
-                    ...prev,
-                    [row.user_id]: matchedRole.id,
-                  }));
-                }}
-                className="min-w-[180px] rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
-              >
-                <option value="">No level</option>
-                {LEVEL_SLUGS.map((slug) => (
-                  <option key={slug} value={slug}>
-                    {slug}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={async () => {
-                  if (!activeOrgId) return;
-                  const source =
-                    sourceUsers.find((u) => Number(u.user_id) === row.user_id) ??
-                    users.find((u) => Number(u.user_id) === row.user_id) ??
-                    null;
-                  try {
-                    const resolved = await ensureUserExistsForTarget(Number(row.user_id), source, activeOrgId);
-                    await setUserDesignation(resolved.userId, {
-                      support_level_id: null,
-                      organisation_id: activeOrgId,
-                    });
-                    toast.success("Level cleared.");
-                    await loadPageData(activeOrgId);
-                  } catch (e) {
-                    toast.error(e instanceof Error ? e.message : "Failed to clear level");
-                  }
-                }}
-                disabled={currentDesignationId == null}
-                className="rounded-lg border border-black/10 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/10 dark:text-slate-200"
-              >
-                Clear
-              </button>
+              <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
+                <select
+                  value={selectedLevelKey}
+                  disabled={!canModifyUsersScreen}
+                  onChange={(e) => {
+                    const nextLevel = e.target.value;
+                    setRowLevelMap((prev) => ({
+                      ...prev,
+                      [row.user_id]: nextLevel,
+                    }));
+                    if (!nextLevel || defaultAgentRoleId == null) return;
+                    setRowRoleMap((prev) => ({
+                      ...prev,
+                      [row.user_id]: defaultAgentRoleId,
+                    }));
+                  }}
+                  className="min-w-[180px] rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
+                >
+                  <option value="">No level</option>
+                  {levelOptions.map((option) => (
+                    <option key={option.key} value={option.key}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </ModifyAccessGuard>
             </div>
           ) : (
             <span className="text-xs text-slate-500">{row.levelLabel || "—"}</span>
           )}
         </td>
         <td className="px-5 py-4">
-          <select
-            value={selectedRoleId ?? ""}
-            onChange={(e) =>
-              setRowRoleMap((prev) => ({
-                ...prev,
-                [row.user_id]: e.target.value ? Number(e.target.value) : null,
-              }))
-            }
-            className="min-w-[160px] rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
-          >
-            <option value="">Select role</option>
-            {roles.map((r) => (
-              <option key={r.id} value={r.id}>
-                {r.name}
-              </option>
-            ))}
-          </select>
+          <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
+            <select
+              value={selectedRoleId ?? ""}
+              disabled={!canModifyUsersScreen}
+              onChange={(e) =>
+                setRowRoleMap((prev) => ({
+                  ...prev,
+                  [row.user_id]: e.target.value ? Number(e.target.value) : null,
+                }))
+              }
+              className="min-w-[160px] rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
+            >
+              <option value="">Select role</option>
+              {assignableRoles.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.name}
+                </option>
+              ))}
+            </select>
+          </ModifyAccessGuard>
         </td>
         <td className="px-5 py-4 text-right">
           <div className="flex items-center justify-end gap-2">
-            {showRemove ? (
+            <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
               <button
                 type="button"
-                onClick={async () => {
-                  if (!activeOrgId) return;
-                  try {
-                    await removeUserScopeOrg(row.user_id, activeOrgId);
-                    toast.success("User removed from scope.");
-                    await loadPageData(activeOrgId);
-                  } catch (e) {
-                    toast.error(e instanceof Error ? e.message : "Failed to remove user");
-                  }
+                onClick={() => {
+                  if (!canModifyUsersScreen) return;
+                  handleApplyRowSelectionToAll(row);
                 }}
-                className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white bg-red-600 hover:bg-red-700"
+                disabled={!canModifyUsersScreen}
+                className="rounded-lg border border-black/10 bg-white/80 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-white/10 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/15"
               >
-                Remove
+                Use for all
               </button>
+            </ModifyAccessGuard>
+            {showRemove ? (
+              <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!canModifyUsersScreen) return;
+                    setRemoveConfirmRow(row);
+                  }}
+                  disabled={!canModifyUsersScreen}
+                  className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
+                >
+                  Remove
+                </button>
+              </ModifyAccessGuard>
             ) : null}
-            <button
-              type="button"
-              onClick={() => void openPreview(row)}
-              className="rounded-lg border border-black/10 px-3 py-1.5 text-xs font-semibold text-slate-700 dark:border-white/10 dark:text-slate-200"
-            >
-              Preview
-            </button>
           </div>
         </td>
       </tr>
@@ -1178,44 +1202,53 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
               className="w-full rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 text-sm font-semibold text-slate-800 dark:border-white/10 dark:bg-white/10 dark:text-slate-100"
             >
               {orgIdNumFromShell ? (
-                <option value={String(orgIdNumFromShell)}>{orgName}</option>
+                <option value={String(orgIdNumFromShell)}>{shellOrgDropdownLabel}</option>
               ) : null}
-              {externalOrgs.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.organization_name}
-                </option>
-              ))}
+              {externalOrgs
+                .filter((o) => !orgIdNumFromShell || Number(o.id) !== orgIdNumFromShell)
+                .map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.organization_name}
+                  </option>
+                ))}
             </select>
           </div>
         ) : null}
         <div className="flex items-center gap-2">
           {isSystemAdminUser ? (
+            <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
+              <button
+                type="button"
+                onClick={() => void handleSyncUsers()}
+                disabled={!canModifyUsersScreen}
+                className="rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-white/10 dark:bg-white/10 dark:text-slate-200"
+              >
+                Sync Users
+              </button>
+            </ModifyAccessGuard>
+          ) : null}
+          <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
             <button
               type="button"
-              onClick={() => void handleSyncUsers()}
-              className="rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-white/10 dark:bg-white/10 dark:text-slate-200"
+              disabled={!canModifyUsersScreen}
+              onClick={() =>
+                canModifyUsersScreen &&
+                setInvite((prev) => ({
+                  ...prev,
+                  open: true,
+                  query: "",
+                  selectedUserIds: [],
+                  selectedRoleId: customerOrgInviteMode ? defaultAgentRoleId : recommendedInviteRoleId,
+                  selectedLevelKey: "",
+                }))
+              }
+              className="inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-semibold text-white shadow-md"
+              style={{ backgroundColor: EZII_BRAND.primary }}
             >
-              Sync Users
+              <UserPlus className="h-4 w-4" />
+              Invite New User
             </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() =>
-              setInvite((prev) => ({
-                ...prev,
-                open: true,
-                query: "",
-                selectedUserIds: [],
-                selectedRoleId: customerOrgInviteMode ? defaultCustomerRoleId : recommendedInviteRoleId,
-                selectedLevelSlug: "",
-              }))
-            }
-            className="inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-xs font-semibold text-white shadow-md"
-            style={{ backgroundColor: EZII_BRAND.primary }}
-          >
-            <UserPlus className="h-4 w-4" />
-            Invite New User
-          </button>
+          </ModifyAccessGuard>
         </div>
       </div>
 
@@ -1294,15 +1327,17 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                   )}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={() => void handleApplyAllChanges()}
-                disabled={bulkApplying || pendingChangesCount === 0}
-                className="rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-                style={{ backgroundColor: EZII_BRAND.primary }}
-              >
-                {bulkApplying ? "Applying..." : `Apply Changes (${pendingChangesCount})`}
-              </button>
+              <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
+                <button
+                  type="button"
+                  onClick={() => void handleApplyAllChanges()}
+                  disabled={!canModifyUsersScreen || bulkApplying || pendingChangesCount === 0}
+                  className="rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{ backgroundColor: EZII_BRAND.primary }}
+                >
+                  {bulkApplying ? "Applying..." : `Apply Changes (${pendingChangesCount})`}
+                </button>
+              </ModifyAccessGuard>
             </div>
           </div>
 
@@ -1466,8 +1501,61 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         </GlassCard>
       )}
 
-      {invite.open ? (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm">
+      {removeConfirmRow && typeof document !== "undefined"
+        ? createPortal(
+          <div className="fixed inset-0 z-[2147483647]">
+            <div className="absolute inset-0 bg-black/35 backdrop-blur-sm" />
+            <div className="absolute inset-0 flex items-center justify-center p-4">
+              <div className="w-full max-w-md overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/10 dark:bg-zinc-950/90">
+                <div className="border-b border-black/10 px-6 py-5 dark:border-white/10">
+                  <h3 className="text-base font-bold text-[#111827] dark:text-slate-100">Remove Agent</h3>
+                  <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                    Remove <strong>{removeConfirmRow.name}</strong> from this organization scope?
+                  </p>
+                </div>
+                <div className="flex items-center justify-end gap-2 px-6 py-4">
+                  <button
+                    type="button"
+                    onClick={() => setRemoveConfirmRow(null)}
+                    disabled={removeSubmitting}
+                    className="rounded-lg px-4 py-2 text-xs font-medium text-slate-700 hover:bg-black/5 disabled:opacity-60 dark:text-slate-200 dark:hover:bg-white/10"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={removeSubmitting}
+                    onClick={async () => {
+                      if (!activeOrgId || !removeConfirmRow) return;
+                      setRemoveSubmitting(true);
+                      try {
+                        await removeUserScopeOrg(removeConfirmRow.user_id, activeOrgId);
+                        toast.success("User removed from scope.");
+                        setRemoveConfirmRow(null);
+                        await loadPageData(activeOrgId);
+                      } catch (e) {
+                        toast.error(e instanceof Error ? e.message : "Failed to remove user");
+                      } finally {
+                        setRemoveSubmitting(false);
+                      }
+                    }}
+                    className="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-60"
+                  >
+                    {removeSubmitting ? "Removing..." : "Remove"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )
+        : null}
+
+      {invite.open && typeof document !== "undefined"
+        ? createPortal(
+        <div className="fixed inset-0 z-[2147483647]">
+          <div className="absolute inset-0 bg-black/35 backdrop-blur-sm" />
+          <div className="absolute inset-0 flex items-center justify-center p-4">
           <div className="w-full max-w-2xl overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/10 dark:bg-zinc-950/90">
             <div className="flex items-start justify-between gap-3 border-b border-black/10 px-6 py-5 dark:border-white/10">
               <div>
@@ -1477,13 +1565,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                 <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
                   Add a team member to the organizational directory.
                 </p>
-                {customerOrgInviteMode ? (
-                  <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
-                    Showing Resolve Biz Services Pvt Ltd (organization 1) users only. The <strong>Level</strong> column is each person&apos;s
-                    current tier in org 1; choose a level below to set their tier for <strong>this tenant</strong>.
-                    Assigned role in this organization is always <strong>Customer</strong>.
-                  </p>
-                ) : null}
+            
               </div>
               <button
                 type="button"
@@ -1500,12 +1582,15 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                 <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Find User</div>
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                  <input
-                    value={invite.query}
-                    onChange={(e) => setInvite((prev) => ({ ...prev, query: e.target.value }))}
-                    placeholder="Search users by name or email..."
-                    className="w-full rounded-xl border border-black/10 bg-white/75 py-2.5 pl-9 pr-3 text-xs dark:border-white/10 dark:bg-white/10"
-                  />
+                  <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
+                    <input
+                      value={invite.query}
+                      disabled={!canModifyUsersScreen}
+                      onChange={(e) => setInvite((prev) => ({ ...prev, query: e.target.value }))}
+                      placeholder="Search users by name or email..."
+                      className="w-full rounded-xl border border-black/10 bg-white/75 py-2.5 pl-9 pr-3 text-xs dark:border-white/10 dark:bg-white/10"
+                    />
+                  </ModifyAccessGuard>
                 </div>
               </div>
 
@@ -1515,13 +1600,15 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                   const selected = invite.selectedUserIds.includes(uid);
                   const inviteLevel =
                     customerOrgInviteMode
-                      ? tierSlugFromUserDesignation(org1DesignationByUserId[uid]) || "—"
+                      ? levelLabelFromKey(tierKeyFromUserDesignation(org1DesignationByUserId[uid]))
                       : null;
                   return (
                     <button
                       key={u.user_id}
                       type="button"
+                      disabled={!canModifyUsersScreen}
                       onClick={() =>
+                        canModifyUsersScreen &&
                         setInvite((prev) => ({
                           ...prev,
                           selectedUserIds: selected
@@ -1529,8 +1616,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                             : [...prev.selectedUserIds, uid],
                         }))
                       }
-                      className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left ${selected ? "bg-[#1E88E5]/10" : "hover:bg-black/5 dark:hover:bg-white/10"
-                        }`}
+                      className={`flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left ${selected ? "bg-[#1E88E5]/10" : "hover:bg-black/5 dark:hover:bg-white/10"}`}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">{u.name}</div>
@@ -1560,48 +1646,54 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                 {customerOrgInviteMode ? (
                   <>
                     <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Level</div>
-                    <select
-                      value={invite.selectedLevelSlug}
-                      onChange={(e) =>
-                        setInvite((prev) => ({
-                          ...prev,
-                          selectedLevelSlug: e.target.value,
-                        }))
-                      }
-                      className="w-full rounded-xl border border-black/10 bg-white/75 px-3 py-2.5 text-xs dark:border-white/10 dark:bg-white/10"
-                    >
-                      <option value="">Select level</option>
-                      {LEVEL_SLUGS.map((slug) => (
-                        <option key={slug} value={slug}>
-                          {slug}
-                        </option>
-                      ))}
-                    </select>
+                    <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
+                      <select
+                        value={invite.selectedLevelKey}
+                        disabled={!canModifyUsersScreen}
+                        onChange={(e) =>
+                          setInvite((prev) => ({
+                            ...prev,
+                            selectedLevelKey: e.target.value,
+                          }))
+                        }
+                        className="w-full rounded-xl border border-black/10 bg-white/75 px-3 py-2.5 text-xs dark:border-white/10 dark:bg-white/10"
+                      >
+                        <option value="">Select level</option>
+                        {levelOptions.map((option) => (
+                          <option key={option.key} value={option.key}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    </ModifyAccessGuard>
                     <p className="mt-1 text-xs text-slate-500">
-                      Assigned role in this organization is fixed to <strong>Customer</strong>. Level is saved for this
+                      Assigned role in this organization is fixed to <strong>Agent</strong>. Level is saved for this
                       tenant (L1 / L2 / L3).
                     </p>
                   </>
                 ) : (
                   <>
                     <div className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Assigned Role</div>
-                    <select
-                      value={invite.selectedRoleId ?? ""}
-                      onChange={(e) =>
-                        setInvite((prev) => ({
-                          ...prev,
-                          selectedRoleId: Number(e.target.value),
-                        }))
-                      }
-                      className="w-full rounded-xl border border-black/10 bg-white/75 px-3 py-2.5 text-xs dark:border-white/10 dark:bg-white/10"
-                    >
-                      <option value="">Select role</option>
-                      {roles.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name}
-                        </option>
-                      ))}
-                    </select>
+                    <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
+                      <select
+                        value={invite.selectedRoleId ?? ""}
+                        disabled={!canModifyUsersScreen}
+                        onChange={(e) =>
+                          setInvite((prev) => ({
+                            ...prev,
+                            selectedRoleId: Number(e.target.value),
+                          }))
+                        }
+                        className="w-full rounded-xl border border-black/10 bg-white/75 px-3 py-2.5 text-xs dark:border-white/10 dark:bg-white/10"
+                      >
+                        <option value="">Select role</option>
+                        {assignableRoles.map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}
+                          </option>
+                        ))}
+                      </select>
+                    </ModifyAccessGuard>
                     <p className="mt-1 text-xs italic text-slate-500">
                       Role list is loaded for selected org and includes custom roles when present.
                     </p>
@@ -1621,135 +1713,25 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
               >
                 Cancel
               </button>
-              <button
-                type="button"
-                disabled={invite.saving}
-                onClick={() => void handleInviteSubmit()}
-                className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                style={{ backgroundColor: EZII_BRAND.primary }}
-              >
-                {invite.saving ? "Sending..." : "Send Invitation"}
-              </button>
+              <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
+                <button
+                  type="button"
+                  disabled={!canModifyUsersScreen || invite.saving}
+                  onClick={() => void handleInviteSubmit()}
+                  className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                  style={{ backgroundColor: EZII_BRAND.primary }}
+                >
+                  {invite.saving ? "Sending..." : "Send Invitation"}
+                </button>
+              </ModifyAccessGuard>
             </div>
           </div>
-        </div>
-      ) : null}
+          </div>
+        </div>,
+        document.body
+      )
+        : null}
 
-      {(previewLoading || preview) ? (
-        <div className="fixed inset-0 z-[75] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm">
-          <div className="w-full max-w-3xl overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/10 dark:bg-zinc-950/90">
-            <div className="flex items-start justify-between gap-3 border-b border-black/10 px-6 py-5 dark:border-white/10">
-              <div>
-                <h2 className="text-lg font-bold text-[#111827] dark:text-slate-100">
-                  Effective Access Preview
-                </h2>
-                <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                  Merged Assigned Role + Level + Override permissions.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => {
-                  setPreview(null);
-                  setPreviewLoading(false);
-                }}
-                className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"
-                aria-label="Close"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="space-y-3 px-6 py-5">
-              {previewLoading ? (
-                <div className="text-xs text-slate-500">Loading preview...</div>
-              ) : preview ? (
-                <>
-                  <div className="text-xs text-slate-600 dark:text-slate-300">
-                    User: <strong>{preview.userName}</strong> ({preview.userId}) | Assigned Role:{" "}
-                    <strong>{preview.roleName}</strong> | Level:{" "}
-                    <strong>{preview.levelName ?? "—"}</strong> | Overrides:{" "}
-                    <strong>{preview.overrideCount}</strong>
-                  </div>
-                  {preview.overrideCount === 0 ? (
-                    <div className="rounded-xl border border-amber-300/70 bg-amber-50/60 px-3 py-2 text-[11px] text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200">
-                      No user-level overrides found for this user in current organization. Effective access is from
-                      Assigned Role + Level merge.
-                    </div>
-                  ) : null}
-                  <div className="grid grid-cols-2 gap-2 text-[11px] md:grid-cols-3">
-                    <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/10">
-                      <div className="text-slate-500">Ticket Access</div>
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">
-                        {String(preview.permissionsJson.ticket_access ?? "own_tickets")}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/10">
-                      <div className="text-slate-500">Assign Scope</div>
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">
-                        {String(preview.permissionsJson.assign_scope ?? "none")}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/10">
-                      <div className="text-slate-500">Can Assign</div>
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">
-                        {preview.permissionsJson.can_assign ? "Yes" : "No"}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/10">
-                      <div className="text-slate-500">Can Resolve</div>
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">
-                        {preview.permissionsJson.can_resolve ? "Yes" : "No"}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/10">
-                      <div className="text-slate-500">Tier1 SLA</div>
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">
-                        {String(preview.permissionsJson.tier1_sla_config ?? "none")}
-                      </div>
-                    </div>
-                    <div className="rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/10">
-                      <div className="text-slate-500">Tier2 SLA</div>
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">
-                        {String(preview.permissionsJson.tier2_sla_config ?? "none")}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="rounded-xl border border-black/10 bg-white/70 p-3 dark:border-white/10 dark:bg-white/10">
-                    <div className="mb-2 text-[11px] font-bold uppercase tracking-wide text-slate-500">
-                      Screen Access
-                    </div>
-                    <div className="max-h-[220px] overflow-auto">
-                      <table className="w-full text-left text-[11px]">
-                        <thead>
-                          <tr className="border-b border-black/10 dark:border-white/10">
-                            <th className="py-1.5">Screen</th>
-                            <th className="py-1.5">View</th>
-                            <th className="py-1.5">Modify</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Object.entries(
-                            (preview.permissionsJson.screen_access as Record<
-                              string,
-                              { view?: boolean; modify?: boolean }
-                            >) ?? {}
-                          ).map(([screenKey, access]) => (
-                            <tr key={screenKey} className="border-b border-black/5 dark:border-white/5">
-                              <td className="py-1.5">{screenKey}</td>
-                              <td className="py-1.5">{access?.view ? "Yes" : "No"}</td>
-                              <td className="py-1.5">{access?.modify ? "Yes" : "No"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </>
-              ) : null}
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

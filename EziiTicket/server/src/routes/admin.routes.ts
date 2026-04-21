@@ -34,6 +34,10 @@ export function registerAdminRoutes(router: Router) {
     const mod = await import("../controllers/admin/roles.controller.js");
     return mod.getRoles(req, res);
   });
+  router.get("/admin/roles/:id/scoped-users", ...rolesRead, async (req, res) => {
+    const mod = await import("../controllers/admin/roles.controller.js");
+    return mod.listScopedUsersByRole(req, res);
+  });
 
   router.post("/admin/roles", ...rolesWrite, async (req, res) => {
     const mod = await import("../controllers/admin/roles.controller.js");
@@ -315,6 +319,11 @@ export function registerAdminRoutes(router: Router) {
     return mod.listQueues(req, res);
   });
 
+  router.get("/admin/queues/open-ticket-counts", ...adminRead("teams_queues"), async (req, res) => {
+    const mod = await import("../controllers/admin/queues.controller.js");
+    return mod.getQueueOpenTicketCounts(req, res);
+  });
+
   router.post("/admin/queues", ...adminWrite("teams_queues"), async (req, res) => {
     const mod = await import("../controllers/admin/queues.controller.js");
     return mod.createQueue(req, res);
@@ -382,6 +391,10 @@ export function registerAdminRoutes(router: Router) {
   router.post("/admin/sla-policies", ...adminWrite("sla_policies"), async (req, res) => {
     const mod = await import("../controllers/admin/slaPolicies.controller.js");
     return mod.createSlaPolicy(req, res);
+  });
+  router.put("/admin/sla-policies/batch", ...adminWrite("sla_policies"), async (req, res) => {
+    const mod = await import("../controllers/admin/slaPolicies.controller.js");
+    return mod.upsertSlaPoliciesBatch(req, res);
   });
   router.put("/admin/sla-policies/:id", ...adminWrite("sla_policies"), async (req, res) => {
     const mod = await import("../controllers/admin/slaPolicies.controller.js");

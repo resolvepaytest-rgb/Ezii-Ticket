@@ -37,9 +37,9 @@
 
   /*
     Brand tokens (centralized)
-    Set via: document.documentElement.dataset.brand = "ezii" | "resolve" | "client"
+    Set via: document.documentElement.dataset.brand = "ezii" | "resolve" | "client" | "ngo"
     Ezii palette: Primary #1E88E5, Secondary #475569, Tertiary #CC6C00, Neutral #F8FAFC
-    Resolve: #4F8EF7 | Client / NGO: #FB9745
+    Resolve: #4F8EF7 | Client: #FB9745 | NGO: deep teal / forest accent
   */
   :root,
   :root[data-brand="ezii"] {
@@ -63,6 +63,13 @@
     /* #FB9745 */
     --brand: 27 96% 63%;
     --brand-2: 48 96% 53%;
+    --primary: var(--brand);
+  }
+
+  :root[data-brand="ngo"] {
+    /* Distinct from default Ezii blue — NGO tenant accent */
+    --brand: 158 64% 32%;
+    --brand-2: 152 55% 42%;
     --primary: var(--brand);
   }
 
@@ -172,4 +179,48 @@ body {
     radial-gradient(900px 400px at 85% 15%, hsl(var(--brand-2) / 0.18), transparent 60%),
     radial-gradient(800px 450px at 55% 90%, hsl(var(--brand) / 0.14), transparent 65%),
     hsl(var(--background));
+}
+
+/* Roles page toggle switch (based on provided CSS). */
+.roles-toggle-checkbox {
+  display: none;
+}
+
+.roles-toggle-slider {
+  width: 44px;
+  height: 22px;
+  background-color: lightgray;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  border: 3px solid transparent;
+  transition: 0.3s;
+  box-shadow: inset 0 0 10px 0 rgb(0 0 0 / 0.25);
+  cursor: pointer;
+}
+
+.roles-toggle-slider::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 100%;
+  background-color: #fff;
+  transform: translateX(-22px);
+  border-radius: 14px;
+  transition: 0.3s;
+  box-shadow: 0 0 10px 3px rgb(0 0 0 / 0.25);
+}
+
+.roles-toggle-checkbox:checked + .roles-toggle-slider {
+  background-color: #2196f3;
+}
+
+.roles-toggle-checkbox:checked + .roles-toggle-slider::before {
+  transform: translateX(22px);
+  box-shadow: 0 0 10px 3px rgb(0 0 0 / 0.25);
+}
+
+.roles-toggle-checkbox:active + .roles-toggle-slider::before {
+  transform: translateX(0);
 }

@@ -6,7 +6,6 @@ import {
   ticketMatchesRoleApplyScope,
   type RoleApplyRow,
 } from "../services/roleTicketScope.js";
-import { env } from "../config/env.js";
 
 type PermissionDoc = Record<string, unknown>;
 
@@ -15,7 +14,6 @@ export type EffectivePolicy = {
   ticket_access: "own_tickets" | "assigned_queue" | "product_queue_escalated" | "org_tickets" | "all_tickets";
   apply_scope: RoleApplyRow | null;
   screens: Record<string, { view: boolean; modify: boolean }>;
-  actions: Record<string, boolean>;
   has_system_admin: boolean;
 };
 
@@ -34,24 +32,6 @@ function toBool(v: unknown): boolean {
   return Boolean(v);
 }
 
-function accessRank(v: unknown): number {
-  const s = String(v ?? "").trim().toLowerCase();
-  if (s === "own_tickets") return 1;
-  if (s === "assigned_queue") return 2;
-  if (s === "product_queue_escalated") return 3;
-  if (s === "org_tickets") return 4;
-  if (s === "all_tickets") return 5;
-  return 0;
-}
-
-function rankToAccess(rank: number): EffectivePolicy["ticket_access"] {
-  if (rank >= 5) return "all_tickets";
-  if (rank === 4) return "org_tickets";
-  if (rank === 3) return "product_queue_escalated";
-  if (rank === 2) return "assigned_queue";
-  return "own_tickets";
-}
-
 function readScreenAccess(
   value: unknown
 ): Record<string, { view: boolean; modify: boolean }> {
@@ -67,13 +47,21 @@ function readScreenAccess(
   return out;
 }
 
-function readActions(value: unknown): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  for (const [k, v] of Object.entries(source)) {
-    out[k] = Boolean(v);
+function deriveTicketAccess(
+  screens: Record<string, { view: boolean; modify: boolean }>,
+  hasSystemAdmin: boolean
+): EffectivePolicy["ticket_access"] {
+  if (hasSystemAdmin) return "all_tickets";
+  if (screens.tickets?.view || screens.tickets?.modify) return "org_tickets";
+  if (
+    screens.agent_team_queue?.view ||
+    screens.agent_team_queue?.modify ||
+    screens.agent_history?.view ||
+    screens.agent_history?.modify
+  ) {
+    return "assigned_queue";
   }
-  return out;
+  return "own_tickets";
 }
 
 function normalizeRoleNameKey(name: string | null | undefined): string {
@@ -89,23 +77,16 @@ function mergePermissionDocs(
   userId: number,
   applyScope: RoleApplyRow | null
 ): EffectivePolicy {
-  let ticketAccessMax = 0;
   const screens: Record<string, { view: boolean; modify: boolean }> = {};
   for (const k of SCREEN_KEYS) screens[k] = { view: false, modify: false };
-  const actions: Record<string, boolean> = {};
 
   for (const d of docs) {
-    ticketAccessMax = Math.max(ticketAccessMax, accessRank(d.ticket_access));
     const screen = readScreenAccess(d.screen_access);
     for (const k of SCREEN_KEYS) {
       screens[k] = {
         view: screens[k].view || screen[k].view || screen[k].modify,
         modify: screens[k].modify || screen[k].modify,
       };
-    }
-    const act = readActions(d.actions);
-    for (const [k, v] of Object.entries(act)) {
-      actions[k] = Boolean(actions[k] || v);
     }
   }
 
@@ -115,10 +96,9 @@ function mergePermissionDocs(
 
   return {
     user_id: userId,
-    ticket_access: rankToAccess(ticketAccessMax),
+    ticket_access: deriveTicketAccess(screens, hasSystemAdmin),
     apply_scope: applyScope,
     screens,
-    actions,
     has_system_admin: hasSystemAdmin,
   };
 }
@@ -177,53 +157,70 @@ export function canModifyScreen(policy: EffectivePolicy | null, screenKey: Scree
 export function canDo(policy: EffectivePolicy | null, actionKey: ActionKey): boolean {
   if (!policy) return false;
   if (policy.has_system_admin) return true;
-  const explicit = policy.actions[actionKey];
-  if (explicit === true) return true;
-  if (env.permissionStrictActions) return false;
+  const canView = (screenKey: ScreenKey) =>
+    Boolean(policy.screens[screenKey]?.view || policy.screens[screenKey]?.modify);
+  const canModify = (screenKey: ScreenKey) => Boolean(policy.screens[screenKey]?.modify);
+  const canViewAny = (...keys: ScreenKey[]) => keys.some((key) => canView(key));
+  const canModifyAny = (...keys: ScreenKey[]) => keys.some((key) => canModify(key));
 
-  const hasTicketsScreen = Boolean(
-    policy.screens.tickets?.view ||
-      policy.screens.tickets?.modify ||
-      policy.screens.my_tickets?.view ||
-      policy.screens.my_tickets?.modify ||
-      policy.screens.agent_my_tickets?.view ||
-      policy.screens.agent_my_tickets?.modify
-  );
-
-  // Legacy fallback while action keys are not fully backfilled in role JSON.
-  if (actionKey === "tickets.list") {
-    return (
-      hasTicketsScreen ||
-      policy.ticket_access === "assigned_queue" ||
-      policy.ticket_access === "product_queue_escalated" ||
-      policy.ticket_access === "org_tickets" ||
-      policy.ticket_access === "all_tickets"
-    );
+  switch (actionKey) {
+    case "tickets.list":
+      return canViewAny("tickets", "agent_team_queue", "agent_history");
+    case "tickets.list_my":
+      return canViewAny("my_tickets", "agent_my_tickets", "tickets");
+    case "tickets.read":
+      return canViewAny("my_tickets", "agent_my_tickets", "tickets", "agent_team_queue", "agent_history");
+    case "tickets.create":
+      return canViewAny("raise_a_ticket", "my_tickets", "tickets");
+    case "tickets.reply":
+      return canModifyAny("my_tickets", "raise_a_ticket", "agent_my_tickets", "tickets", "agent_team_queue");
+    case "tickets.internal_notes.read":
+      return canViewAny("tickets", "agent_my_tickets", "agent_team_queue", "agent_history");
+    case "tickets.attach":
+    case "tickets.attach_download":
+      return canViewAny("my_tickets", "agent_my_tickets", "tickets", "agent_team_queue", "agent_history");
+    case "tickets.status_change":
+    case "tickets.escalate":
+    case "tickets.assign":
+      return canModifyAny("tickets", "agent_team_queue", "agent_history");
+    case "tickets.request_escalation":
+      return canModifyAny("my_tickets", "raise_a_ticket");
+    case "tickets.reopen":
+      return canModifyAny("my_tickets", "raise_a_ticket", "tickets", "agent_team_queue", "agent_history");
+    case "notifications.read":
+    case "notifications.mark_read":
+      return true;
+    case "roles.read":
+      return canView("roles_permissions");
+    case "roles.manage":
+      return canModify("roles_permissions");
+    case "users.read":
+      return canView("users");
+    case "users.manage":
+      return canModify("users");
+    case "routing_rules.manage":
+      return canModify("routing_rules");
+    case "priority_master.manage":
+      return canModify("priority_master");
+    case "keyword_routing.manage":
+      return canModify("keyword_routing");
+    case "sla.policies.manage":
+      return canModify("sla_policies");
+    case "notification_templates.manage":
+      return canModify("notification_templates");
+    case "canned_responses.manage":
+      return canModify("canned_responses");
+    case "custom_fields.manage":
+      return canModify("custom_fields");
+    case "api_tokens.manage":
+      return canModify("api_tokens");
+    case "webhooks.manage":
+      return canModify("webhooks");
+    case "audit_logs.read":
+      return canView("audit_logs");
+    default:
+      return false;
   }
-  if (actionKey === "tickets.list_my") {
-    return true;
-  }
-  if (actionKey === "tickets.read") {
-    return true;
-  }
-  if (actionKey === "tickets.create") {
-    return (
-      Boolean(policy.screens.raise_a_ticket?.view || policy.screens.raise_a_ticket?.modify) ||
-      hasTicketsScreen
-    );
-  }
-  if (actionKey === "notifications.read" || actionKey === "notifications.mark_read") {
-    return true;
-  }
-  if (actionKey === "tickets.internal_notes.read") {
-    return (
-      policy.ticket_access === "assigned_queue" ||
-      policy.ticket_access === "product_queue_escalated" ||
-      policy.ticket_access === "org_tickets" ||
-      policy.ticket_access === "all_tickets"
-    );
-  }
-  return false;
 }
 
 function ticketMetadataObject(metadataJson: unknown): Record<string, unknown> {
@@ -262,13 +259,6 @@ export function buildTicketScopePredicate(policy: EffectivePolicy | null): (row:
     }
     if (policy.ticket_access === "assigned_queue") {
       return isReporter || isAssignee;
-    }
-    // product_queue_escalated: keep legacy behavior while queue-based model is completed.
-    // Allow own/assigned and then apply metadata constraints where configured.
-    if (policy.ticket_access === "product_queue_escalated") {
-      if (isReporter || isAssignee) return true;
-      if (!apply || (apply.apply_role_to ?? "all") === "all") return true;
-      return ticketMatchesRoleApplyScope(ticketMetadataObject(row.metadata_json), apply, uid);
     }
     return false;
   };

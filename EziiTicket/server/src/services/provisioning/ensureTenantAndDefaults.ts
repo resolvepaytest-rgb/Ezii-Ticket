@@ -1,6 +1,7 @@
 import { pool } from "../../db/pool.js";
 import { ensureDefaultTier1BoundsForOrg } from "../../controllers/admin/slaTier1Bounds.js";
 import { buildScreenAccess } from "../../authz/permissionSchema.js";
+import { seedKeywordRoutingForOrg } from "../keywordRoutingSeed.js";
 
 function permissionsJsonWithScreen(
   base: Record<string, unknown>,
@@ -59,98 +60,30 @@ async function ensureDefaultRoles(organisationId: bigint) {
     [
       "customer",
       "End user; can access own tickets",
-      permissionsJsonWithScreen(
-        {
-          ticket_access: "own_tickets",
-          assign_scope: "none",
-          can_assign: false,
-          can_resolve: false,
-          tier1_sla_config: "none",
-          tier2_sla_config: "none",
-        },
-        false
-      ),
+      permissionsJsonWithScreen({}, false),
     ],
     [
       "org_admin",
       "Customer org admin; can access org tickets",
-      permissionsJsonWithScreen(
-        {
-          ticket_access: "org_tickets",
-          assign_scope: "none",
-          can_assign: false,
-          can_resolve: false,
-          tier1_sla_config: "none",
-          tier2_sla_config: "none",
-        },
-        false
-      ),
+      permissionsJsonWithScreen({}, false),
+    ],
+    [
+      "agent",
+      "Support agent; workspace access is defined by role and routing stage by support level",
+      permissionsJsonWithScreenAgentTier({}),
     ],
   ] as const;
 
   const eziiOnlyRoles = [
     [
-      "l1_agent",
-      "Frontline support agent",
-      permissionsJsonWithScreenAgentTier({
-        ticket_access: "assigned_queue",
-        assign_scope: "self",
-        can_assign: true,
-        can_resolve: true,
-        tier1_sla_config: "none",
-        tier2_sla_config: "none",
-      }),
-    ],
-    [
-      "l2_specialist",
-      "Product specialist",
-      permissionsJsonWithScreenAgentTier({
-        ticket_access: "product_queue_escalated",
-        assign_scope: "l2_queue",
-        can_assign: true,
-        can_resolve: true,
-        tier1_sla_config: "none",
-        tier2_sla_config: "none",
-      }),
-    ],
-    [
-      "l3_engineer",
-      "Engineering/DevOps",
-      permissionsJsonWithScreenAgentTier({
-        ticket_access: "all_tickets",
-        assign_scope: "any",
-        can_assign: true,
-        can_resolve: true,
-        tier1_sla_config: "none",
-        tier2_sla_config: "none",
-      }),
-    ],
-    [
       "team_lead",
       "Team lead; visibility + intervention",
-      permissionsJsonWithScreenAgentTier({
-        ticket_access: "all_tickets",
-        assign_scope: "any",
-        can_assign: true,
-        can_resolve: true,
-        tier1_sla_config: "view",
-        tier2_sla_config: "view",
-      }),
+      permissionsJsonWithScreenAgentTier({}),
     ],
     [
       "system_admin",
       "System admin; full access + configuration",
-      permissionsJsonWithScreen(
-        {
-          ticket_access: "all_tickets",
-          assign_scope: "any",
-          can_assign: true,
-          can_resolve: true,
-          tier1_sla_config: "edit",
-          tier2_sla_config: "edit",
-        },
-        true
-      ),
+      permissionsJsonWithScreen({}, true),
     ],
   ] as const;
 
@@ -178,6 +111,38 @@ async function ensureDefaultRoles(organisationId: bigint) {
                else roles.permissions_json
              end`,
       [organisationId, name, description, permissionsJson]
+    );
+  }
+}
+
+async function ensureDefaultSupportLevels(organisationId: bigint) {
+  const defaults = [
+    ["L1", "L1", "Level 1 routing tier"],
+    ["L2", "L2", "Level 2 routing tier"],
+    ["L3", "L3", "Level 3 routing tier"],
+  ] as const;
+
+  for (const [code, name, description] of defaults) {
+    await pool.query(
+      `update org_support_levels
+       set name = $3,
+           description = $4,
+           is_default = true,
+           updated_at = now()
+       where organisation_id = $1
+         and lower(trim(code)) = lower(trim($2))`,
+      [organisationId, code, name, description]
+    );
+    await pool.query(
+      `insert into org_support_levels (organisation_id, code, name, description, is_default)
+       select $1,$2,$3,$4,true
+       where not exists (
+         select 1
+         from org_support_levels
+         where organisation_id = $1
+           and lower(trim(code)) = lower(trim($2))
+       )`,
+      [organisationId, code, name, description]
     );
   }
 }
@@ -415,11 +380,17 @@ export async function ensureTenantAndDefaultsByOrgId(orgId: unknown) {
 
   await ensureOrganisationRow(organisationId);
   await ensureDefaultRoles(organisationId);
+  await ensureDefaultSupportLevels(organisationId);
   await ensureOrganisationSettings(organisationId);
   await ensureDataRetentionPolicy(organisationId);
   await ensureOrganisationProducts(organisationId);
   await ensureDefaultProductQueuesForOrganisation(organisationId);
   await ensureDefaultTier1BoundsForOrg(organisationId);
   await ensureDefaultPriorityMasterRowsForOrganisation(organisationId);
+
+  const orgIdNum = Number(organisationId);
+  if (Number.isFinite(orgIdNum) && orgIdNum > 0) {
+    await seedKeywordRoutingForOrg(orgIdNum);
+  }
 }
 

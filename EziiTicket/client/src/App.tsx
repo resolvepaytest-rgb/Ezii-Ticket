@@ -7,7 +7,13 @@ import {
 import { EziiTicketLandingPage } from "@pages/public/EziiTicketLandingPage";
 import { NavPlaceholder } from "@components/common/NavPlaceholder";
 import { ThemeProvider } from "@components/common/ThemeProvider";
-import { loginByLink, loginByToken, authMe, getAuthMePermissions } from "@api/authApi";
+import {
+  loginByLink,
+  loginByToken,
+  authMe,
+  getAuthMePermissions,
+  syncClientProductsFromExternal,
+} from "@api/authApi";
 import { AppShell } from "@components/layout/AppShell";
 import type { SidebarItem } from "@components/layout/Sidebar";
 import { collectHeaderSearchItems } from "@components/layout/headerSearch";
@@ -33,7 +39,6 @@ import {
   type FilterSystemAdminSidebarMode,
   type ScreenAccessMap,
 } from "@/config/roleScreenMap";
-import type { ActionAccessMap } from "@/config/permissionKeys";
 import { CreateTicketDrawer } from "@components/tickets/CreateTicketDrawer";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -127,7 +132,6 @@ function preloadFrequentPages() {
 const ACTIVE_ORG_STORAGE_KEY = "active-org-id";
 const JWT_TOKEN_STORAGE_KEY = "jwt_token";
 const DASHBOARD_VIEW_MODE_STORAGE_KEY = "view-mode";
-const DASHBOARD_REFRESH_STORAGE_KEY = "dashboard-refresh-seconds";
 
 const NAV_PATH_MAP: Record<string, string> = {
   org_dashboard: "/dashboard",
@@ -308,27 +312,6 @@ function normalizeScreenAccessForRuntime(
     normalized[agentKey] = { ...legacy };
   }
   return Object.keys(normalized).length > 0 ? normalized : null;
-}
-
-function normalizeActionsForRuntime(
-  input: ActionAccessMap | null | undefined
-): ActionAccessMap | null {
-  if (!input || typeof input !== "object") return null;
-  const out: ActionAccessMap = {};
-  for (const [k, v] of Object.entries(input)) {
-    out[k] = Boolean(v);
-  }
-  return Object.keys(out).length > 0 ? out : null;
-}
-
-function canDoAction(
-  actionAccess: ActionAccessMap | null | undefined,
-  actionKey: string,
-  fallback: boolean
-): boolean {
-  if (!actionAccess || Object.keys(actionAccess).length === 0) return fallback;
-  const v = actionAccess[actionKey];
-  return typeof v === "boolean" ? v : fallback;
 }
 
 function removeSidebarKey(items: ReturnType<typeof getEtsSystemAdminSidebarItems>, keyToRemove: string) {
@@ -558,10 +541,6 @@ export default function App() {
       (readStorage(DASHBOARD_VIEW_MODE_STORAGE_KEY) as "team" | "my_view" | null) ??
       "my_view"
   );
-  const [dashboardRefreshSeconds, setDashboardRefreshSeconds] = useState<number>(
-    () => Number(readStorage(DASHBOARD_REFRESH_STORAGE_KEY) ?? "60") || 60
-  );
-
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
   const logout = useAuthStore((s) => s.logout);
@@ -588,7 +567,6 @@ export default function App() {
   const [meSupportLevelName, setMeSupportLevelName] = useState<string | null>(null);
   const [permissionsLoaded, setPermissionsLoaded] = useState(false);
   const [screenAccess, setScreenAccess] = useState<ScreenAccessMap | null>(null);
-  const [actionAccess, setActionAccess] = useState<ActionAccessMap | null>(null);
   const [createTicketDrawerOpen, setCreateTicketDrawerOpen] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationTab, setNotificationTab] = useState<"unread" | "read">("unread");
@@ -597,6 +575,7 @@ export default function App() {
   const [notificationUnreadCount, setNotificationUnreadCount] = useState(0);
   const [focusedTicketId, setFocusedTicketId] = useState<number | null>(null);
   const notificationRequestIdRef = useRef(0);
+  const syncedClientProductsTokenRef = useRef<string | null>(null);
 
   const loadNotifications = async (tab: "unread" | "read" = notificationTab) => {
     if (!user) return;
@@ -688,6 +667,7 @@ export default function App() {
         const claims = me.user as JwtUserClaims;
         setUser(claims);
         useUIStore.setState({ mode: "light" });
+        useUIStore.getState().setBrand(me.is_ngo ? "ngo" : "ezii");
       } catch {
         setUser(null);
       } finally {
@@ -695,6 +675,24 @@ export default function App() {
       }
     })();
   }, [setUser]);
+
+  useEffect(() => {
+    if (!user) {
+      syncedClientProductsTokenRef.current = null;
+      return;
+    }
+    const token = readStorage(JWT_TOKEN_STORAGE_KEY);
+    if (!token) return;
+    if (syncedClientProductsTokenRef.current === token) return;
+    syncedClientProductsTokenRef.current = token;
+    void syncClientProductsFromExternal()
+      .then((sync) => {
+        useUIStore.getState().setBrand(sync.is_ngo ? "ngo" : "ezii");
+      })
+      .catch(() => {
+        // non-blocking login enhancement; keep current brand
+      });
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
@@ -719,7 +717,6 @@ export default function App() {
   useEffect(() => {
     if (!user) {
       setScreenAccess(null);
-      setActionAccess(null);
       setMeScopedRoleName(null);
       setMeAccessRoleNames([]);
       setMeSupportLevelName(null);
@@ -740,24 +737,16 @@ export default function App() {
         setMeSupportLevelName(data.support_level?.support_level_name ?? null);
         const raw = data.permissions_json?.screen_access;
         const normalized = normalizeScreenAccessForRuntime(raw as ScreenAccessMap | null | undefined);
-        const actionRaw = data.permissions_json?.actions as ActionAccessMap | null | undefined;
-        const actionNormalized = normalizeActionsForRuntime(actionRaw);
         if (normalized) {
           setScreenAccess(normalized);
         } else {
           setScreenAccess(null);
-        }
-        if (actionNormalized) {
-          setActionAccess(actionNormalized);
-        } else {
-          setActionAccess(null);
         }
         setPermissionsLoaded(true);
       })
       .catch(() => {
         if (!cancelled) {
           setScreenAccess(null);
-          setActionAccess(null);
           setMeScopedRoleName(null);
           setMeAccessRoleNames([]);
           setMeSupportLevelName(null);
@@ -770,14 +759,13 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!user) return;
-    writeStorage(DASHBOARD_VIEW_MODE_STORAGE_KEY, viewMode);
-  }, [viewMode, user]);
+    if (!user) useUIStore.getState().setBrand("ezii");
+  }, [user]);
 
   useEffect(() => {
     if (!user) return;
-    writeStorage(DASHBOARD_REFRESH_STORAGE_KEY, String(dashboardRefreshSeconds));
-  }, [dashboardRefreshSeconds, user]);
+    writeStorage(DASHBOARD_VIEW_MODE_STORAGE_KEY, viewMode);
+  }, [viewMode, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -787,10 +775,8 @@ export default function App() {
   const handleLogout = () => {
     writeStorage(ACTIVE_ORG_STORAGE_KEY, null);
     writeStorage(DASHBOARD_VIEW_MODE_STORAGE_KEY, null);
-    writeStorage(DASHBOARD_REFRESH_STORAGE_KEY, null);
     setActiveNav("agent_dashboard");
     setViewMode("team");
-    setDashboardRefreshSeconds(60);
     setActiveOrgId(null);
     setNotificationsOpen(false);
     setNotificationItems([]);
@@ -804,8 +790,7 @@ export default function App() {
   const hasScreenAccessView = Boolean(
     screenAccess && Object.values(screenAccess).some((entry) => Boolean(entry?.view || entry?.modify))
   );
-  const hasAnyActionAccess = Boolean(actionAccess && Object.keys(actionAccess).length > 0);
-  const hasAnyViewAccess = hasScreenAccessView || hasAnyActionAccess || hasAnySystemAdminScreenAccess(screenAccess);
+  const hasAnyViewAccess = hasScreenAccessView || hasAnySystemAdminScreenAccess(screenAccess);
   const canViewCustomerDashboard = canViewCustomerNavKey("cust_dashboard", screenAccess);
   const canViewCustomerTickets = canViewCustomerNavKey("cust_my_tickets", screenAccess);
   const isSystemAdminIdentity =
@@ -829,7 +814,7 @@ export default function App() {
     normalizeRoleNameKeyForShell(meScopedRoleName ?? user?.role_name) === "org_admin";
   const isAdminCustomerMyViewMode =
     viewMode === "my_view" && isPrimaryOrgAdminRole;
-  const showCreateTicketButtonInSidebar = true;
+  const showCreateTicketButtonInSidebar = !noAccessAssigned;
   const hasCustomerScopedAccess =
     canViewCustomerDashboard ||
     canViewCustomerTickets ||
@@ -842,29 +827,25 @@ export default function App() {
   const canOpenMyTickets =
     isAdminCustomerMyViewMode ||
     isSystemAdminInterface ||
-    canDoAction(actionAccess, "tickets.list_my", false) ||
     canViewCustomerTickets ||
     hasScreenViewAccess(screenAccess, "agent_my_tickets");
   const canOpenRaiseTicket =
     isAdminCustomerMyViewMode ||
     isSystemAdminInterface ||
-    canDoAction(actionAccess, "tickets.create", false) ||
     canViewCustomerNavKey("cust_raise_ticket", screenAccess);
   const canOpenOrgProducts =
     isSystemAdminInterface ||
     (!isPrimaryCustomerRole &&
-      (canDoAction(actionAccess, "products.read", false) || hasScreenViewAccess(screenAccess, "products")));
+      (hasScreenViewAccess(screenAccess, "users") || hasScreenViewAccess(screenAccess, "teams_queues")));
   const canOpenOrgUsersRoles =
     isSystemAdminInterface ||
-    (!isPrimaryCustomerRole &&
-      (canDoAction(actionAccess, "users.read", false) || hasScreenViewAccess(screenAccess, "users")));
+    (!isPrimaryCustomerRole && hasScreenViewAccess(screenAccess, "users"));
   const canOpenAgentsScreen =
     isSystemAdminInterface ||
     hasAnyScreenViewAccess(screenAccess, ADMIN_TOGGLE_NAV_TO_SCREEN_KEYS.sys_agents);
   const canOpenOrgSlaPolicies =
     isSystemAdminInterface ||
-    (!isPrimaryCustomerRole &&
-      (canDoAction(actionAccess, "sla.policies.manage", false) || hasScreenViewAccess(screenAccess, "sla_policies")));
+    (!isPrimaryCustomerRole && hasScreenViewAccess(screenAccess, "sla_policies"));
   const isCustomerExperience =
     isAdminCustomerMyViewMode ||
     isPrimaryCustomerRole ||
@@ -873,16 +854,7 @@ export default function App() {
       !canOpenOrgProducts &&
       !canOpenOrgUsersRoles &&
       !canOpenOrgSlaPolicies);
-  /**
-   * Shell template only: explicit **actions** (products.read / users.read / sla.policies.manage).
-   * Do not use screen_access "users" alone — that was flipping team/agent to org_admin and killing My/Admin toggle.
-   */
-  const isOrgAdminShell =
-    !isPrimaryCustomerRole &&
-    isPrimaryOrgAdminRole &&
-    (canDoAction(actionAccess, "products.read", false) ||
-      canDoAction(actionAccess, "users.read", false) ||
-      canDoAction(actionAccess, "sla.policies.manage", false));
+  const isOrgAdminShell = !isPrimaryCustomerRole && isPrimaryOrgAdminRole;
   const shellRoleKind: EtsAppRoleKind = isSystemAdminInterface
     ? "system_admin"
     : isPrimaryCustomerRole || isCustomerExperience
@@ -997,7 +969,7 @@ export default function App() {
     (shellRoleKind === "customer"
       ? hasCustomerScopedAccess
       : shellRoleKind !== "system_admin" && adminToggleItems.length > 0);
-  const showDashboardViewToggle = splitSidebarEligible;
+  const showDashboardViewToggle = !noAccessAssigned && splitSidebarEligible;
   const forceTeamDashboardView =
     !splitSidebarEligible &&
     (isSystemAdminInterface ||
@@ -1490,15 +1462,10 @@ export default function App() {
                 {activeNav === "sys_dashboard" ? (
                   <SystemOverviewDashboardPage
                     orgId={activeOrgId}
-                    refreshSeconds={dashboardRefreshSeconds}
-                    onRefreshSecondsChange={(seconds) => {
-                      if (seconds !== 10 && seconds !== 60) return;
-                      setDashboardRefreshSeconds(seconds);
-                    }}
                     onNavigateToOrganizations={() => setActiveNav("partner_setup")}
                   />
                 ) : null}
-                {activeNav === "sys_tickets" ? <SystemTicketsPage /> : null}
+                {activeNav === "sys_tickets" ? <SystemTicketsPage onOpenTicket={goToTicketByRole} /> : null}
                 {activeNav === "sys_agents" ? <AgentsPage orgId={activeOrgId} /> : null}
                 {activeNav === "workspace_module_c" ? (
                   <NavPlaceholder
@@ -1508,11 +1475,13 @@ export default function App() {
                 ) : null}
                 {/* {activeNav === "resolve_setup" ? <ResolveSetupPage orgId={activeOrgId} /> : null} */}
                 {activeNav === "partner_setup" ? (
-                  <OrganizationsPage orgId={activeOrgId} onOrgChange={setActiveOrgId} />
+                  <OrganizationsPage orgId={activeOrgId} />
                 ) : null}
                 {activeNav === "users_roles" ? <UsersRolesPage orgId={activeOrgId} /> : null}
                 {activeNav === "roles_management" ? <RolesPage /> : null}
-                {activeNav === "teams_queues" ? <TeamsQueuesPage orgId={activeOrgId} /> : null}
+                {activeNav === "teams_queues" ? (
+                  <TeamsQueuesPage orgId={activeOrgId} onOrgChange={setActiveOrgId} />
+                ) : null}
                 {activeNav === "routing_rules" ? <RoutingRulesPage orgId={activeOrgId} /> : null}
                 {activeNav === "priority_master" ? (
                   <PriorityMasterPage orgId={activeOrgId} organizationName={profile?.organization_name} />
@@ -1537,12 +1506,6 @@ export default function App() {
                     viewMode={dashboardViewMode}
                     dashboardNavKey={activeNav}
                     orgId={activeOrgId}
-                    refreshSeconds={dashboardRefreshSeconds}
-                    onRefreshSecondsChange={(seconds) => {
-                      if (seconds !== 10 && seconds !== 60) return;
-                      if (seconds === 10 && dashboardViewMode !== "team") return;
-                      setDashboardRefreshSeconds(seconds);
-                    }}
                     onNavigateToTickets={
                       canOpenTicketList || canOpenMyTickets ? goToDashboardTicketsDestination : undefined
                     }

@@ -125,6 +125,8 @@ export type Organisation = {
   timezone: string;
   logo_url: string | null;
   portal_subdomain: string | null;
+  /** Mirrored with `organisation_settings.is_ngo`; driven by external client-products sync. */
+  is_ngo?: boolean;
 };
 
 export type OrganisationSettings = {
@@ -201,7 +203,13 @@ export type Team = {
   updated_at?: string;
 };
 
-export type ApplyRoleTo = "all" | "reportees" | "attribute" | "sub_attribute";
+export type ApplyRoleTo =
+  | "all"
+  | "reportees"
+  | "worker_type"
+  | "attribute"
+  | "customer_org"
+  | "internal_support";
 
 export type Role = {
   id: number;
@@ -214,7 +222,7 @@ export type Role = {
   apply_role_to?: ApplyRoleTo;
   apply_attribute_id?: string | null;
   apply_sub_attribute_id?: string | null;
-  apply_worker_type_id?: number | null;
+  apply_worker_type_id?: string | null;
 };
 
 export type User = {
@@ -230,10 +238,22 @@ export type User = {
   status: string;
   /** Excluded from least-loaded assignment when true. */
   out_of_office?: boolean;
+  /** Inclusive scheduled OOO start date (YYYY-MM-DD). */
+  ooo_start_date?: string | null;
+  /** Inclusive scheduled OOO end date (YYYY-MM-DD). */
+  ooo_end_date?: string | null;
   /** Worker report / Ezii “Department” field (dataField `type_id_1`). */
   type_id_1?: string | null;
   created_at?: string;
   updated_at?: string;
+};
+
+export type RoleScopedUser = Pick<
+  User,
+  "user_id" | "organisation_id" | "name" | "email" | "status" | "user_type" | "type_id_1"
+> & {
+  type_id_12?: string | null;
+  role_name?: string | null;
 };
 
 export type UserRole = {
@@ -308,6 +328,8 @@ export type UserScopeOrg = {
 export type ExternalOrganization = {
   id: string;
   organization_name: string;
+  /** `1` means current user is org-admin for this client org. */
+  role_id?: string;
 };
 
 export type ExternalUserProfile = {
@@ -704,6 +726,13 @@ export function listQueues(orgId?: number, productId?: number | null) {
   return http<ApiResponse<Queue[]>>(url).then((r) => r.data);
 }
 
+export type QueueOpenTicketCountRow = { queue_id: number; waiting_count: number };
+
+export function getQueueOpenTicketCounts(organisationId: number) {
+  const qp = new URLSearchParams({ organisation_id: String(organisationId) });
+  return http<ApiResponse<QueueOpenTicketCountRow[]>>(`/admin/queues/open-ticket-counts?${qp}`).then((r) => r.data);
+}
+
 export function listTeams(orgId?: number) {
   const qp = new URLSearchParams();
   if (orgId !== undefined && orgId !== null) qp.set("organisation_id", String(orgId));
@@ -758,7 +787,7 @@ export function createUser(payload: {
 
 export function updateUser(
   userId: number,
-  patch: Partial<Pick<User, "name" | "email" | "phone" | "user_type" | "status" | "out_of_office">>
+  patch: Partial<Pick<User, "name" | "email" | "phone" | "user_type" | "status" | "out_of_office" | "ooo_start_date" | "ooo_end_date">>
 ) {
   return http<ApiResponse<User>>(`/admin/users/${userId}`, {
     method: "PUT",
@@ -781,7 +810,7 @@ export function createRole(payload: {
   apply_role_to?: ApplyRoleTo;
   apply_attribute_id?: string | null;
   apply_sub_attribute_id?: string | null;
-  apply_worker_type_id?: number | null;
+  apply_worker_type_id?: string | null;
 }) {
   return http<ApiResponse<Role>>("/admin/roles", {
     method: "POST",
@@ -847,13 +876,21 @@ export function updateRole(
     apply_role_to?: ApplyRoleTo;
     apply_attribute_id?: string | null;
     apply_sub_attribute_id?: string | null;
-    apply_worker_type_id?: number | null;
+    apply_worker_type_id?: string | null;
   }
 ) {
   return http<ApiResponse<Role>>(`/admin/roles/${id}`, {
     method: "PUT",
     body: JSON.stringify(payload),
   }).then((r) => r.data);
+}
+
+export function listRoleScopedUsers(roleId: number, organisationId?: number) {
+  const qp = new URLSearchParams();
+  if (organisationId != null) qp.set("organisation_id", String(organisationId));
+  return http<ApiResponse<RoleScopedUser[]> & { meta?: { mode?: string; total?: number } }>(
+    `/admin/roles/${roleId}/scoped-users${qp.toString() ? `?${qp.toString()}` : ""}`
+  ).then((r) => ({ users: r.data, meta: r.meta ?? null }));
 }
 
 export function deleteRole(id: number) {
@@ -1028,10 +1065,14 @@ export async function getExternalOrganizations() {
       result: string;
       statuscode: number;
       message: string;
-      organizations: ExternalOrganization[];
-    }>(`${baseUrl}/organization/organization-list?organization_type=only-customer`)
+      client_data: ExternalOrganization[];
+    }>(`${baseUrl}/organization/client-organizations`)
   );
-  return data.organizations ?? [];
+  return [...(data.client_data ?? [])].sort((a, b) =>
+    (a.organization_name ?? "").localeCompare(b.organization_name ?? "", undefined, {
+      sensitivity: "base",
+    })
+  );
 }
 
 export async function getExternalUserProfile() {
@@ -1064,6 +1105,28 @@ export async function getExternalEmployees() {
   );
 
   return collectEmployeeArrays(data);
+}
+
+export type ExternalReportee = {
+  user_id: number;
+  empnumber?: string;
+  empname?: string;
+  email?: string;
+};
+
+export async function getExternalReportingManagerReportees(userId: number) {
+  const baseUrl = getExternalBaseUrl();
+  const token = getJwtToken() ?? "no-token";
+  const cacheKey = `external:reportees:${baseUrl}:${token}:${userId}`;
+  const data = await getWithCache(cacheKey, () =>
+    externalGet<{
+      result: string;
+      statuscode: number;
+      message: string;
+      data?: ExternalReportee[];
+    }>(`${baseUrl}/organization/reporting-manager/${encodeURIComponent(String(userId))}/reportees`)
+  );
+  return data.data ?? [];
 }
 
 export function listTeamMembers(teamId: number) {
@@ -1369,6 +1432,28 @@ export function deleteSlaPolicy(id: number) {
   }).then((r) => r.data);
 }
 
+export function upsertSlaPoliciesBatch(
+  organisationId: number,
+  policies: Array<{
+    tier: string;
+    priority: string;
+    name?: string;
+    first_response_mins: number;
+    resolution_mins: number;
+    warning_percent?: number;
+    is_active?: boolean;
+    metadata_json?: string | Record<string, unknown> | null;
+  }>
+) {
+  return http<ApiResponse<{ organisation_id: number; created: number; updated: number }>>(
+    "/admin/sla-policies/batch",
+    {
+      method: "PUT",
+      body: JSON.stringify({ organisation_id: organisationId, policies }),
+    }
+  ).then((r) => r.data);
+}
+
 export function listNotificationTemplates(orgId: number) {
   const qp = new URLSearchParams({ organisation_id: String(orgId) });
   return http<ApiResponse<NotificationTemplate[]>>(`/admin/notification-templates?${qp.toString()}`).then((r) => r.data);
@@ -1405,9 +1490,13 @@ export function deleteNotificationTemplate(id: number) {
   }).then((r) => r.data);
 }
 
-export function listCannedResponses(orgId: number) {
-  const qp = new URLSearchParams({ organisation_id: String(orgId) });
-  return http<ApiResponse<CannedResponse[]>>(`/admin/canned-responses?${qp.toString()}`).then((r) => r.data);
+/** Omit `orgId` (or pass null) to list all platform canned responses. */
+export function listCannedResponses(orgId?: number | null) {
+  if (typeof orgId === "number" && Number.isFinite(orgId)) {
+    const qp = new URLSearchParams({ organisation_id: String(orgId) });
+    return http<ApiResponse<CannedResponse[]>>(`/admin/canned-responses?${qp.toString()}`).then((r) => r.data);
+  }
+  return http<ApiResponse<CannedResponse[]>>("/admin/canned-responses").then((r) => r.data);
 }
 
 export function createCannedResponse(payload: {
@@ -1437,9 +1526,12 @@ export function deleteCannedResponse(id: number) {
   }).then((r) => r.data);
 }
 
-export function listCustomFields(orgId: number) {
-  const qp = new URLSearchParams({ organisation_id: String(orgId) });
-  return http<ApiResponse<CustomField[]>>(`/admin/custom-fields?${qp.toString()}`).then((r) => r.data);
+export function listCustomFields(orgId?: number) {
+  if (typeof orgId === "number" && Number.isFinite(orgId)) {
+    const qp = new URLSearchParams({ organisation_id: String(orgId) });
+    return http<ApiResponse<CustomField[]>>(`/admin/custom-fields?${qp.toString()}`).then((r) => r.data);
+  }
+  return http<ApiResponse<CustomField[]>>("/admin/custom-fields").then((r) => r.data);
 }
 
 export function createCustomField(payload: {

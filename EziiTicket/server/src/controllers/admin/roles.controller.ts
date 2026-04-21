@@ -4,8 +4,73 @@ import { asInt } from "./adminUtils.js";
 import { appendAdminAudit } from "./adminAudit.js";
 import { ensureTenantAndDefaultsByOrgId } from "../../services/provisioning/ensureTenantAndDefaults.js";
 import { isEziiSystemAdmin } from "./eziiSystemAdmin.js";
+import { fetchExternalOrgGet } from "../../services/externalOrgApiClient.js";
+import { EXTERNAL_ORG_PATHS } from "../../config/externalOrgApi.js";
 
-const APPLY_MODES = new Set(["all", "reportees", "attribute", "sub_attribute"]);
+const APPLY_MODES = new Set(["all", "reportees", "worker_type", "attribute", "customer_org", "internal_support"]);
+
+type ScopedUserRow = {
+  user_id: number;
+  organisation_id: number;
+  name: string;
+  email: string;
+  status: string;
+  user_type: string | null;
+  type_id_1: string | null;
+  type_id_12: string | null;
+  role_name: string | null;
+};
+
+async function loadOrgUsers(orgId: number): Promise<ScopedUserRow[]> {
+  const result = await pool.query<ScopedUserRow>(
+    `select u.user_id::int as user_id,
+            u.organisation_id::int as organisation_id,
+            u.name,
+            u.email,
+            coalesce(u.status, 'active') as status,
+            u.user_type,
+            u.type_id_1::text as type_id_1,
+            u.type_id_12::text as type_id_12,
+            null::text as role_name
+     from users u
+     where u.organisation_id = $1::bigint
+     union
+     select u.user_id::int as user_id,
+            u.organisation_id::int as organisation_id,
+            coalesce(nullif(trim(uso.user_name), ''), u.name) as name,
+            coalesce(nullif(trim(uso.email), ''), u.email) as email,
+            coalesce(u.status, 'active') as status,
+            u.user_type,
+            u.type_id_1::text as type_id_1,
+            u.type_id_12::text as type_id_12,
+            uso.ticket_role::text as role_name
+     from user_scope_org uso
+     join users u on u.user_id = uso.user_id
+     where uso.scope_org_id = $1::bigint
+       and uso.is_active = true`,
+    [orgId]
+  );
+  const byUserId = new Map<number, ScopedUserRow>();
+  for (const row of result.rows) {
+    if (!byUserId.has(row.user_id)) byUserId.set(row.user_id, row);
+  }
+  return Array.from(byUserId.values()).sort((a, b) =>
+    String(a.name ?? "").localeCompare(String(b.name ?? ""), undefined, { sensitivity: "base" })
+  );
+}
+
+function forwardAuth(req: Request): string | undefined {
+  const auth = req.headers.authorization;
+  return typeof auth === "string" && auth.trim() ? auth : undefined;
+}
+
+function splitCsvIds(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  return String(raw)
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
 
 async function rolesHasCreatedAtColumn(): Promise<boolean> {
   const res = await pool.query<{ exists: boolean }>(
@@ -30,13 +95,13 @@ function parseApplyRolePayload(
     apply_role_to?: string;
     apply_attribute_id?: string | null;
     apply_sub_attribute_id?: string | null;
-    apply_worker_type_id?: number | null;
+    apply_worker_type_id?: string | null;
   }
 ): {
   apply_role_to: string;
   apply_attribute_id: string | null;
   apply_sub_attribute_id: string | null;
-  apply_worker_type_id: number | null;
+  apply_worker_type_id: string | null;
 } | { error: string } {
   const raw = body ?? {};
   const d = defaults ?? {};
@@ -55,18 +120,17 @@ function parseApplyRolePayload(
       ? d.apply_sub_attribute_id ?? null
       : String(raw.apply_sub_attribute_id).trim() || null;
   const wt = raw.apply_worker_type_id !== undefined ? raw.apply_worker_type_id : d.apply_worker_type_id;
-  const apply_worker_type_id =
-    wt === null || wt === undefined || wt === ""
-      ? null
-      : Number(wt);
-  if (apply_worker_type_id != null && !Number.isFinite(apply_worker_type_id)) {
-    return { error: "invalid apply_worker_type_id" };
-  }
+  const apply_worker_type_id = wt === null || wt === undefined ? null : String(wt).trim() || null;
   if (apply_role_to === "attribute" && !apply_attribute_id) {
     return { error: "apply_attribute_id is required when apply_role_to is attribute" };
   }
-  if (apply_role_to === "sub_attribute" && (!apply_attribute_id || !apply_sub_attribute_id)) {
-    return { error: "apply_attribute_id and apply_sub_attribute_id are required for sub_attribute" };
+  if (apply_role_to !== "attribute") {
+    return {
+      apply_role_to,
+      apply_attribute_id: null,
+      apply_sub_attribute_id: null,
+      apply_worker_type_id: apply_role_to === "worker_type" ? apply_worker_type_id : null,
+    };
   }
   return {
     apply_role_to,
@@ -138,6 +202,134 @@ export async function createRole(req: Request, res: Response) {
   return res.status(201).json({ ok: true, data: row });
 }
 
+export async function listScopedUsersByRole(req: Request, res: Response) {
+  const roleId = asInt(req.params.id);
+  if (!roleId) return res.status(400).json({ ok: false, error: "invalid role id" });
+  const authOrgId = asInt(req.user?.org_id);
+  if (!authOrgId) return res.status(400).json({ ok: false, error: "invalid organisation" });
+  const requestedOrgId = asInt(req.query.organisation_id);
+  const targetOrgId = isEziiSystemAdmin(req) && requestedOrgId ? requestedOrgId : authOrgId;
+
+  const roleQ = await pool.query<{
+    id: number;
+    organisation_id: number;
+    apply_role_to: string;
+    apply_attribute_id: string | null;
+    apply_sub_attribute_id: string | null;
+    apply_worker_type_id: string | null;
+  }>(
+    `select id, organisation_id, apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id
+     from roles
+     where id = $1::bigint and organisation_id = $2::bigint
+     limit 1`,
+    [roleId, targetOrgId]
+  );
+  const role = roleQ.rows[0];
+  if (!role) return res.status(404).json({ ok: false, error: "role not found" });
+
+  const users = await loadOrgUsers(targetOrgId);
+  const mode = String(role.apply_role_to ?? "all").toLowerCase();
+
+  if (mode === "all") {
+    return res.json({ ok: true, data: users, meta: { mode, total: users.length } });
+  }
+
+  if (mode === "customer_org") {
+    const filtered = users.filter((u) => Number(u.organisation_id) !== 1);
+    return res.json({ ok: true, data: filtered, meta: { mode, total: filtered.length } });
+  }
+
+  if (mode === "internal_support") {
+    const filtered = users.filter((u) => {
+      if (Number(u.organisation_id) === 1) return true;
+      const roleName = String(u.role_name ?? "").toLowerCase();
+      return roleName.includes("agent") || roleName.includes("support") || roleName.includes("team");
+    });
+    return res.json({ ok: true, data: filtered, meta: { mode, total: filtered.length } });
+  }
+
+  if (mode === "reportees") {
+    return res.json({
+      ok: true,
+      data: [],
+      meta: {
+        mode,
+        total: 0,
+        runtime_resolved: true,
+        message: "Reportees are resolved at runtime for logged-in user access checks.",
+      },
+    });
+  }
+
+  if (mode === "worker_type") {
+    if (!role.apply_worker_type_id) {
+      return res.status(400).json({ ok: false, error: "apply_worker_type_id is required for worker_type scope" });
+    }
+    const selectedWorkerTypeIds = splitCsvIds(role.apply_worker_type_id);
+    if (!selectedWorkerTypeIds.length) return res.json({ ok: true, data: users, meta: { mode, total: users.length } });
+    const wtRes = await fetchExternalOrgGet(EXTERNAL_ORG_PATHS.workerTypeList, forwardAuth(req));
+    if (wtRes.status >= 400) {
+      return res.status(wtRes.status).json({ ok: false, error: "failed to fetch worker types from external api" });
+    }
+    const wtPayload = wtRes.json as {
+      worker_type_list?: Array<{ id?: number | string; customer_worker_type?: string }>;
+      data?: Array<{ id?: number | string; customer_worker_type?: string }>;
+    } | null;
+    const wtList = wtPayload?.worker_type_list ?? wtPayload?.data ?? [];
+    const selectedNames = new Set(
+      wtList
+        .filter((w) => selectedWorkerTypeIds.includes(String(w.id)))
+        .map((w) => String(w.customer_worker_type ?? "").trim().toLowerCase())
+        .filter(Boolean)
+    );
+    if (!selectedNames.size) return res.json({ ok: true, data: [], meta: { mode, total: 0 } });
+    const filtered = users.filter((u) => selectedNames.has(String(u.user_type ?? "").trim().toLowerCase()));
+    return res.json({ ok: true, data: filtered, meta: { mode, total: filtered.length } });
+  }
+
+  if (mode === "attribute") {
+    if (!role.apply_attribute_id) {
+      return res.status(400).json({ ok: false, error: "apply_attribute_id is required for attribute scope" });
+    }
+    const attrIds = splitCsvIds(role.apply_attribute_id);
+    const subAttrIds = splitCsvIds(role.apply_sub_attribute_id);
+    if (!attrIds.length) {
+      return res.status(400).json({ ok: false, error: "at least one apply_attribute_id is required for attribute scope" });
+    }
+    const q = await pool.query<ScopedUserRow>(
+      `select u.user_id::int as user_id,
+              u.organisation_id::int as organisation_id,
+              u.name,
+              u.email,
+              coalesce(u.status, 'active') as status,
+              u.user_type,
+              u.type_id_1::text as type_id_1,
+              u.type_id_12::text as type_id_12,
+              null::text as role_name
+       from users u
+       where u.organisation_id = $1::bigint
+         and (
+           u.type_id_1::text = any($2::text[])
+           or coalesce(u.worker_master_raw ->> 'attribute_id', '') = any($2::text[])
+         )
+         and (
+           coalesce(array_length($3::text[], 1), 0) = 0
+           or u.type_id_12::text = any($3::text[])
+           or coalesce(u.worker_master_raw ->> 'attribute_sub_id', '') = any($3::text[])
+         )
+         and (
+           coalesce(array_length($4::text[], 1), 0) = 0
+           or coalesce(u.worker_master_raw ->> 'worker_type_id', '') = any($4::text[])
+         )
+       order by u.name asc`,
+      [targetOrgId, attrIds, subAttrIds, splitCsvIds(role.apply_worker_type_id)]
+    );
+    return res.json({ ok: true, data: q.rows, meta: { mode, total: q.rows.length } });
+  }
+
+  return res.json({ ok: true, data: users, meta: { mode: "all", total: users.length } });
+}
+
 export async function updateRole(req: Request, res: Response) {
   const id = asInt(req.params.id);
   if (!id) return res.status(400).json({ ok: false, error: "invalid id" });
@@ -174,7 +366,7 @@ export async function updateRole(req: Request, res: Response) {
     apply_sub_attribute_id: ea?.apply_sub_attribute_id,
     apply_worker_type_id:
       ea?.apply_worker_type_id != null && ea.apply_worker_type_id !== ""
-        ? Number(ea.apply_worker_type_id)
+        ? String(ea.apply_worker_type_id)
         : null,
   });
   if ("error" in apply) return res.status(400).json({ ok: false, error: apply.error });

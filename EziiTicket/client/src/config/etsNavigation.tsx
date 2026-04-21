@@ -14,8 +14,8 @@ import {
   KeyRound,
   LayoutDashboard,
   LayoutGrid,
-  RadioTower,
-  ScrollText,
+  // RadioTower,
+  // ScrollText,
   Send,
   Settings,
   // Settings2,
@@ -48,8 +48,8 @@ export const SYSTEM_ADMIN_SHELL_KEYS = new Set<string>([
   "notification_templates",
   "canned_responses",
   "custom_fields",
-  "api_webhooks",
-  "audit_log",
+  // "api_webhooks",
+  // "audit_log",
 ]);
 
 /** Nav keys that only the System Admin shell may show; other roles are redirected away if stored. */
@@ -67,8 +67,8 @@ export const SYSTEM_ADMIN_EXCLUSIVE_NAV_KEYS = new Set<string>([
   "notification_templates",
   "canned_responses",
   "custom_fields",
-  "api_webhooks",
-  "audit_log",
+  // "api_webhooks",
+  // "audit_log",
   "roles_management",
 ]);
 
@@ -83,8 +83,8 @@ const systemConfigurationChildren: SidebarItem[] = [
   { key: "canned_responses", label: "Canned Responses", icon: FileText },
   { key: "notification_templates", label: "Notification Templates", icon: Send },
   { key: "custom_fields", label: "Custom Fields", icon: LayoutGrid },
-  { key: "audit_log", label: "Audit Log", icon: ScrollText },
-  { key: "api_webhooks", label: "API & Webhooks", icon: RadioTower },
+  // { key: "audit_log", label: "Audit Log", icon: ScrollText },
+  // { key: "api_webhooks", label: "API & Webhooks", icon: RadioTower },
   // { key: "resolve_setup", label: "Resolve Setup", icon: Settings2 },
 ];
 
@@ -150,8 +150,8 @@ export function getEtsSidebarItemsForRole(role: EtsAppRoleKind): SidebarItem[] {
           { key: "canned_responses", label: "Canned Responses", icon: FileText },
           { key: "notification_templates", label: "Notification Templates", icon: Send },
           { key: "custom_fields", label: "Custom Fields", icon: LayoutGrid },
-          { key: "audit_log", label: "Audit Log", icon: ScrollText },
-          { key: "api_webhooks", label: "API & Webhooks", icon: RadioTower },
+          // { key: "audit_log", label: "Audit Log", icon: ScrollText },
+          // { key: "api_webhooks", label: "API & Webhooks", icon: RadioTower },
         ],
       },
       { key: "workspace_module_c", label: "Reports", icon: BarChart3 },

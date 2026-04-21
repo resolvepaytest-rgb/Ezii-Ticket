@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
 import {
   addTicketMessage,
   downloadTicketAttachmentBlob,
@@ -22,7 +23,7 @@ import { getAuthMePermissions } from "@api/authApi";
 import { toast } from "sonner";
 import { useAuthStore } from "@store/useAuthStore";
 import { cn } from "@/lib/utils";
-import type { ActionAccessMap } from "@/config/permissionKeys";
+import type { ScreenAccessMap } from "@/config/permissionKeys";
 import {
   ArrowUpCircle,
   ChevronDown,
@@ -47,14 +48,32 @@ type MyTicketsPageProps = {
 const PAGE_SIZE = 8;
 const DRAFT_STORAGE_PREFIX = "ezii_ticket_reply_draft_v1";
 
-function canDoAction(
-  actionAccess: ActionAccessMap | null | undefined,
-  actionKey: string,
-  fallback: boolean
+function hasScreenViewAccess(
+  screenAccess: ScreenAccessMap | null | undefined,
+  screenKey: keyof ScreenAccessMap
 ): boolean {
-  if (!actionAccess || Object.keys(actionAccess).length === 0) return fallback;
-  const v = actionAccess[actionKey];
-  return typeof v === "boolean" ? v : fallback;
+  return Boolean(screenAccess?.[screenKey]?.view || screenAccess?.[screenKey]?.modify);
+}
+
+function hasScreenModifyAccess(
+  screenAccess: ScreenAccessMap | null | undefined,
+  screenKey: keyof ScreenAccessMap
+): boolean {
+  return Boolean(screenAccess?.[screenKey]?.modify);
+}
+
+function normalizeScreenAccess(
+  raw: ScreenAccessMap | null | undefined
+): ScreenAccessMap | null {
+  if (!raw || typeof raw !== "object") return null;
+  const normalized: ScreenAccessMap = {};
+  for (const [key, value] of Object.entries(raw)) {
+    normalized[key as keyof ScreenAccessMap] = {
+      view: Boolean(value?.view || value?.modify),
+      modify: Boolean(value?.modify),
+    };
+  }
+  return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 function statusBadgeClass(status: string) {
@@ -358,16 +377,28 @@ export function MyTicketsPage({
   const [menuOpenId, setMenuOpenId] = useState<number | null>(null);
   const [cannedResponses, setCannedResponses] = useState<CannedResponse[]>([]);
   const [cannedSearch, setCannedSearch] = useState("");
-  const [actionAccess, setActionAccess] = useState<ActionAccessMap | null>(null);
+  const [screenAccess, setScreenAccess] = useState<ScreenAccessMap | null>(null);
   const detailSectionRef = useRef<HTMLDivElement | null>(null);
-  const hasExplicitActionPermissions = Boolean(actionAccess && Object.keys(actionAccess).length > 0);
-  const canReply = canDoAction(actionAccess, "tickets.reply", false);
-  const canStatusChange = canDoAction(actionAccess, "tickets.status_change", false);
-  const canEscalate = canDoAction(actionAccess, "tickets.escalate", false);
-  const canReopen = canDoAction(actionAccess, "tickets.reopen", true);
-  const canRequestEscalation = canDoAction(actionAccess, "tickets.request_escalation", false);
-  const canWriteInternal = canDoAction(actionAccess, "tickets.internal_notes.read", false);
-  const isSupportExperience = hasExplicitActionPermissions ? canWriteInternal : false;
+  const canCustomerModifyTickets =
+    hasScreenModifyAccess(screenAccess, "my_tickets") || hasScreenModifyAccess(screenAccess, "raise_a_ticket");
+  const canAgentModifyTickets =
+    hasScreenModifyAccess(screenAccess, "tickets") ||
+    hasScreenModifyAccess(screenAccess, "agent_my_tickets") ||
+    hasScreenModifyAccess(screenAccess, "agent_team_queue") ||
+    hasScreenModifyAccess(screenAccess, "agent_history");
+  const canSupportViewTickets =
+    hasScreenViewAccess(screenAccess, "tickets") ||
+    hasScreenViewAccess(screenAccess, "agent_my_tickets") ||
+    hasScreenViewAccess(screenAccess, "agent_team_queue") ||
+    hasScreenViewAccess(screenAccess, "agent_history");
+  const canReply = canCustomerModifyTickets || canAgentModifyTickets;
+  const canStatusChange = canAgentModifyTickets;
+  const canEscalate = canAgentModifyTickets;
+  const canReopen = canCustomerModifyTickets || canAgentModifyTickets;
+  const canRequestEscalation = canCustomerModifyTickets;
+  const canWriteInternal = canSupportViewTickets;
+  const isSupportExperience = canWriteInternal;
+  const modifyAccessMessage = "You don't have modify access";
 
   const loadRows = useCallback(
     async (showSpinner = true) => {
@@ -416,19 +447,10 @@ export function MyTicketsPage({
     void getAuthMePermissions()
       .then((data) => {
         if (cancelled) return;
-        const raw = data.permissions_json?.actions as ActionAccessMap | undefined;
-        if (!raw || typeof raw !== "object") {
-          setActionAccess(null);
-          return;
-        }
-        const normalized: ActionAccessMap = {};
-        for (const [k, v] of Object.entries(raw)) {
-          normalized[k] = Boolean(v);
-        }
-        setActionAccess(Object.keys(normalized).length > 0 ? normalized : null);
+        setScreenAccess(normalizeScreenAccess(data.permissions_json?.screen_access as ScreenAccessMap | undefined));
       })
       .catch(() => {
-        if (!cancelled) setActionAccess(null);
+        if (!cancelled) setScreenAccess(null);
       });
     return () => {
       cancelled = true;
@@ -1130,30 +1152,36 @@ export function MyTicketsPage({
                   </div>
                   {canStatusChange || canEscalate ? (
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <button
-                        type="button"
-                        disabled={!canStatusChange || statusActionBusy || detail.status.toLowerCase() === "pending"}
-                        onClick={() => void setPending()}
-                        className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
-                      >
-                        Set Pending
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!canStatusChange || statusActionBusy || detail.status.toLowerCase() === "resolved"}
-                        onClick={() => void setResolved()}
-                        className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
-                      >
-                        Set Resolved
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!canEscalate || statusActionBusy}
-                        onClick={() => void escalate()}
-                        className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
-                      >
-                        Escalate
-                      </button>
+                      <InstantTooltip disabled={!canStatusChange} message={modifyAccessMessage}>
+                        <button
+                          type="button"
+                          disabled={!canStatusChange || statusActionBusy || detail.status.toLowerCase() === "pending"}
+                          onClick={() => void setPending()}
+                          className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
+                        >
+                          Set Pending
+                        </button>
+                      </InstantTooltip>
+                      <InstantTooltip disabled={!canStatusChange} message={modifyAccessMessage}>
+                        <button
+                          type="button"
+                          disabled={!canStatusChange || statusActionBusy || detail.status.toLowerCase() === "resolved"}
+                          onClick={() => void setResolved()}
+                          className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
+                        >
+                          Set Resolved
+                        </button>
+                      </InstantTooltip>
+                      <InstantTooltip disabled={!canEscalate} message={modifyAccessMessage}>
+                        <button
+                          type="button"
+                          disabled={!canEscalate || statusActionBusy}
+                          onClick={() => void escalate()}
+                          className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
+                        >
+                          Escalate
+                        </button>
+                      </InstantTooltip>
                     </div>
                   ) : null}
                 </div>
@@ -1263,15 +1291,17 @@ export function MyTicketsPage({
 
               <div className="flex flex-wrap items-center gap-1.5">
                 {!canWriteInternal && detail.can_request_escalation && canRequestEscalation ? (
-                  <button
-                    type="button"
-                    disabled={!canRequestEscalation || requestEscalationBusy || statusActionBusy}
-                    onClick={() => void requestCustomerEscalationAction()}
-                    className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 shadow-sm hover:bg-amber-100 disabled:opacity-60 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/60"
-                  >
-                    <ArrowUpCircle className="h-3.5 w-3.5" aria-hidden />
-                    {requestEscalationBusy ? "Requesting…" : "Request escalation"}
-                  </button>
+                  <InstantTooltip disabled={!canRequestEscalation} message={modifyAccessMessage}>
+                    <button
+                      type="button"
+                      disabled={!canRequestEscalation || requestEscalationBusy || statusActionBusy}
+                      onClick={() => void requestCustomerEscalationAction()}
+                      className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 shadow-sm hover:bg-amber-100 disabled:opacity-60 dark:border-amber-800/50 dark:bg-amber-950/40 dark:text-amber-100 dark:hover:bg-amber-950/60"
+                    >
+                      <ArrowUpCircle className="h-3.5 w-3.5" aria-hidden />
+                      {requestEscalationBusy ? "Requesting…" : "Request escalation"}
+                    </button>
+                  </InstantTooltip>
                 ) : null}
                 {!canWriteInternal &&
                 !detail.can_request_escalation &&
@@ -1281,14 +1311,16 @@ export function MyTicketsPage({
                   </span>
                 ) : null}
                 {!canWriteInternal && detail.status.toLowerCase() === "resolved" ? (
-                  <button
-                    type="button"
-                    disabled={!canReopen || statusActionBusy}
-                    onClick={() => void reopen()}
-                    className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
-                  >
-                    Reopen
-                  </button>
+                  <InstantTooltip disabled={!canReopen} message={modifyAccessMessage}>
+                    <button
+                      type="button"
+                      disabled={!canReopen || statusActionBusy}
+                      onClick={() => void reopen()}
+                      className="rounded-lg border border-black/10 bg-white px-2.5 py-1 text-[11px] font-medium shadow-sm dark:border-white/15 dark:bg-zinc-900 disabled:opacity-60"
+                    >
+                      Reopen
+                    </button>
+                  </InstantTooltip>
                 ) : null}
               </div>
 
@@ -1518,37 +1550,43 @@ export function MyTicketsPage({
                   <div className="flex flex-wrap items-center gap-2">
                     {canStatusChange ? (
                       <>
-                        <button
-                          type="button"
-                          onClick={() => void sendMessageAndSetStatus("pending")}
-                          disabled={!canReply || !canStatusChange || sending || statusActionBusy}
-                          className="rounded-xl border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold text-[#1A202C] shadow-sm hover:bg-slate-50 disabled:opacity-60 dark:border-white/15 dark:bg-zinc-900 dark:text-foreground dark:hover:bg-zinc-800"
-                        >
-                          Reply + Pending
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => void sendMessageAndSetStatus("resolved")}
-                          disabled={!canReply || !canStatusChange || sending || statusActionBusy}
-                          className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100 dark:hover:bg-emerald-900/45"
-                        >
-                          Reply + Resolved
-                        </button>
+                        <InstantTooltip disabled={!canStatusChange || !canReply} message={modifyAccessMessage}>
+                          <button
+                            type="button"
+                            onClick={() => void sendMessageAndSetStatus("pending")}
+                            disabled={!canReply || !canStatusChange || sending || statusActionBusy}
+                            className="rounded-xl border border-black/10 bg-white px-3 py-1.5 text-xs font-semibold text-[#1A202C] shadow-sm hover:bg-slate-50 disabled:opacity-60 dark:border-white/15 dark:bg-zinc-900 dark:text-foreground dark:hover:bg-zinc-800"
+                          >
+                            Reply + Pending
+                          </button>
+                        </InstantTooltip>
+                        <InstantTooltip disabled={!canStatusChange || !canReply} message={modifyAccessMessage}>
+                          <button
+                            type="button"
+                            onClick={() => void sendMessageAndSetStatus("resolved")}
+                            disabled={!canReply || !canStatusChange || sending || statusActionBusy}
+                            className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 shadow-sm hover:bg-emerald-100 disabled:opacity-60 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-100 dark:hover:bg-emerald-900/45"
+                          >
+                            Reply + Resolved
+                          </button>
+                        </InstantTooltip>
                       </>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() => void sendMessage()}
-                      disabled={
-                        !canReply ||
-                        sending ||
-                        (!isSupportExperience && detail.reporter_user_id !== currentUserId) ||
-                        (!isSupportExperience && ["closed", "cancelled"].includes(detail.status.toLowerCase()))
-                      }
-                      className="rounded-xl bg-[#0F5EA8] px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-[#0d5290] disabled:opacity-60 dark:bg-sky-600 dark:hover:bg-sky-500"
-                    >
-                      {sending ? "Sending..." : "Send message"}
-                    </button>
+                    <InstantTooltip disabled={!canReply} message={modifyAccessMessage}>
+                      <button
+                        type="button"
+                        onClick={() => void sendMessage()}
+                        disabled={
+                          !canReply ||
+                          sending ||
+                          (!isSupportExperience && detail.reporter_user_id !== currentUserId) ||
+                          (!isSupportExperience && ["closed", "cancelled"].includes(detail.status.toLowerCase()))
+                        }
+                        className="rounded-xl bg-[#0F5EA8] px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-[#0d5290] disabled:opacity-60 dark:bg-sky-600 dark:hover:bg-sky-500"
+                      >
+                        {sending ? "Sending..." : "Send message"}
+                      </button>
+                    </InstantTooltip>
                   </div>
                 </div>
               </div>

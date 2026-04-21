@@ -1,7 +1,6 @@
 import type { Request, Response } from "express";
 import { pool } from "../../db/pool.js";
 import { asInt } from "./adminUtils.js";
-import { isEziiSystemAdmin } from "./eziiSystemAdmin.js";
 import { appendAdminAudit } from "./adminAudit.js";
 
 export type PriorityKey = "P1" | "P2" | "P3" | "P4";
@@ -19,10 +18,10 @@ export const DEFAULT_TIER1_BOUNDS_FALLBACK: Record<
   PriorityKey,
   { minFirstResponseMins: number; maxFirstResponseMins: number; minResolutionMins: number; maxResolutionMins: number }
 > = {
-  P1: { minFirstResponseMins: 15, maxFirstResponseMins: 120, minResolutionMins: 120, maxResolutionMins: 480 },
-  P2: { minFirstResponseMins: 60, maxFirstResponseMins: 360, minResolutionMins: 240, maxResolutionMins: 960 },
-  P3: { minFirstResponseMins: 120, maxFirstResponseMins: 720, minResolutionMins: 960, maxResolutionMins: 2880 },
-  P4: { minFirstResponseMins: 240, maxFirstResponseMins: 1440, minResolutionMins: 2400, maxResolutionMins: 10080 },
+  P1: { minFirstResponseMins: 15, maxFirstResponseMins: 60, minResolutionMins: 120, maxResolutionMins: 480 },
+  P2: { minFirstResponseMins: 60, maxFirstResponseMins: 240, minResolutionMins: 240, maxResolutionMins: 2880 },
+  P3: { minFirstResponseMins: 120, maxFirstResponseMins: 480, minResolutionMins: 1440, maxResolutionMins: 7200 },
+  P4: { minFirstResponseMins: 240, maxFirstResponseMins: 2880, minResolutionMins: 4320, maxResolutionMins: 20160 },
 };
 
 export type ResolvedTier1Bound = (typeof DEFAULT_TIER1_BOUNDS_FALLBACK)[PriorityKey];
@@ -116,9 +115,6 @@ export async function listSlaTier1Bounds(req: Request, res: Response) {
 }
 
 export async function putSlaTier1Bounds(req: Request, res: Response) {
-  if (!isEziiSystemAdmin(req)) {
-    return res.status(403).json({ ok: false, error: "Only Ezii System Admin can update SLA Tier 1 bounds." });
-  }
   const orgId = asInt(req.params.id);
   if (!orgId) return res.status(400).json({ ok: false, error: "invalid organisation id" });
 

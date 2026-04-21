@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
 import { assignTicket, getTicket, listTickets, updateTicketStatus, type TicketDetail, type TicketRow } from "@api/ticketApi";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import { toast } from "sonner";
 import { useAuthStore } from "@store/useAuthStore";
 import { cn } from "@/lib/utils";
@@ -123,6 +125,8 @@ export function AgentTeamQueuePage({ onOpenTicket }: AgentTeamQueuePageProps) {
   const [nowMs, setNowMs] = useState(() => Date.now());
   const prevTotalRef = useRef<number | null>(null);
   const [queueTrendPct, setQueueTrendPct] = useState<number | null>(null);
+  const canModify = useScreenModifyAccess("agent_team_queue");
+  const modifyAccessMessage = "You don't have modify access";
   const searchRef = useRef(search);
   searchRef.current = search;
 
@@ -557,22 +561,24 @@ export function AgentTeamQueuePage({ onOpenTicket }: AgentTeamQueuePageProps) {
                           {waitLabel}
                         </td>
                         <td className="px-2 py-1.5 text-right align-middle">
-                          <button
-                            type="button"
-                            disabled={rowActionBusyId === row.id || !myUserId}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void claimMeFromRow(row);
-                            }}
-                            className={cn(
-                              "rounded-md px-2 py-1 text-[10px] font-semibold transition-opacity disabled:opacity-50",
-                              highPri
-                                ? "bg-primary text-primary-foreground hover:opacity-90"
-                                : "border border-border bg-muted/60 text-foreground hover:bg-muted"
-                            )}
-                          >
-                            {rowActionBusyId === row.id ? "…" : "Pick up"}
-                          </button>
+                          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                            <button
+                              type="button"
+                              disabled={!canModify || rowActionBusyId === row.id || !myUserId}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void claimMeFromRow(row);
+                              }}
+                              className={cn(
+                                "rounded-md px-2 py-1 text-[10px] font-semibold transition-opacity disabled:opacity-50",
+                                highPri
+                                  ? "bg-primary text-primary-foreground hover:opacity-90"
+                                  : "border border-border bg-muted/60 text-foreground hover:bg-muted"
+                              )}
+                            >
+                              {rowActionBusyId === row.id ? "…" : "Pick up"}
+                            </button>
+                          </InstantTooltip>
                         </td>
                       </tr>
                     );
@@ -649,22 +655,26 @@ export function AgentTeamQueuePage({ onOpenTicket }: AgentTeamQueuePageProps) {
                     <h3 className={cn("text-sm font-semibold leading-snug", HEADING)}>{detail.subject}</h3>
                   </div>
                   <div className="flex flex-wrap gap-1">
-                    <button
-                      type="button"
-                      disabled={assigning || !myUserId}
-                      onClick={() => void claimMe()}
-                      className="rounded-md bg-primary px-2 py-1 text-[10px] font-semibold text-primary-foreground disabled:opacity-50"
-                    >
-                      Pick up (me)
-                    </button>
-                    <button
-                      type="button"
-                      disabled={rowActionBusyId === selected.id}
-                      onClick={() => void setPendingFromRow(selected)}
-                      className="rounded-md border border-border px-2 py-1 text-[10px] font-semibold text-foreground"
-                    >
-                      Set pending
-                    </button>
+                    <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                      <button
+                        type="button"
+                        disabled={!canModify || assigning || !myUserId}
+                        onClick={() => void claimMe()}
+                        className="rounded-md bg-primary px-2 py-1 text-[10px] font-semibold text-primary-foreground disabled:opacity-50"
+                      >
+                        Pick up (me)
+                      </button>
+                    </InstantTooltip>
+                    <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                      <button
+                        type="button"
+                        disabled={!canModify || rowActionBusyId === selected.id}
+                        onClick={() => void setPendingFromRow(selected)}
+                        className="rounded-md border border-border px-2 py-1 text-[10px] font-semibold text-foreground"
+                      >
+                        Set pending
+                      </button>
+                    </InstantTooltip>
                   </div>
                 </div>
                 <p className="line-clamp-2 text-[10px] leading-snug text-muted-foreground">{detail.description}</p>
@@ -680,14 +690,16 @@ export function AgentTeamQueuePage({ onOpenTicket }: AgentTeamQueuePageProps) {
                       placeholder="User id"
                     />
                   </div>
-                  <button
-                    type="button"
-                    disabled={assigning}
-                    onClick={() => void quickAssign()}
-                    className="h-7 rounded-md bg-[hsl(var(--brand))] px-2.5 text-[10px] font-semibold text-white disabled:opacity-50"
-                  >
-                    {assigning ? "…" : "Assign"}
-                  </button>
+                  <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                    <button
+                      type="button"
+                      disabled={!canModify || assigning}
+                      onClick={() => void quickAssign()}
+                      className="h-7 rounded-md bg-[hsl(var(--brand))] px-2.5 text-[10px] font-semibold text-white disabled:opacity-50"
+                    >
+                      {assigning ? "…" : "Assign"}
+                    </button>
+                  </InstantTooltip>
                 </div>
               </div>
             )}

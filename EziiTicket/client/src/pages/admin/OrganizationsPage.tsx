@@ -1,14 +1,13 @@
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
 import { OrgProductAssignModal } from "@pages/admin/OrgProductAssignModal";
 import {
   getExternalOrganizations,
   getOrganisationProducts,
   getSystemOrganisationTicketMetrics,
-  listAdminAuditLogs,
   listOrganisations,
   listProducts,
-  type AdminAuditLog,
   type ExternalOrganization,
   type Organisation,
   type OrganisationProduct,
@@ -18,14 +17,11 @@ import {
 import { EZII_BRAND } from "@/lib/eziiBrand";
 import { resolveOrganisationDisplayName } from "@/lib/organisationDisplay";
 import { cn } from "@/lib/utils";
+import { syncClientProductsFromExternal } from "@api/authApi";
 import { useAuthStore } from "@store/useAuthStore";
-import {
-  AlertTriangle,
-  Clock,
-  Pencil,
-  Plus,
-  Sparkles,
-} from "lucide-react";
+import { useUIStore } from "@store/useUIStore";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Pencil, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 const PRIMARY = EZII_BRAND.primary;
@@ -38,8 +34,17 @@ const glassSubtle =
 const glassInteractive =
   "border border-black/10 bg-white/45 backdrop-blur-md transition-colors hover:bg-white/55 dark:border-white/15 dark:bg-white/10 dark:hover:bg-white/[0.14]";
 
-type WorkspaceTab = "active" | "archived";
 type StatusFilter = "ALL" | "HEALTHY" | "WARNING";
+
+/** `organisations.id` is bigint; APIs often return it as string. Compare filters with this. */
+function organisationIdNum(id: Organisation["id"]): number {
+  return Number(id);
+}
+
+function normalizeOrgId(id: string | number): string {
+  const n = Number(id);
+  return Number.isFinite(n) ? String(n) : String(id).trim();
+}
 
 function safeOrganisationDisplayName(
   org: Organisation,
@@ -49,18 +54,6 @@ function safeOrganisationDisplayName(
   if (typeof resolved === "string" && resolved.trim()) return resolved.trim();
   const idNum = Number(org?.id);
   return Number.isFinite(idNum) ? `Organization ${idNum}` : "Organization";
-}
-
-function formatRelativeTime(iso: string): string {
-  const deltaMs = Date.now() - new Date(iso).getTime();
-  if (!Number.isFinite(deltaMs)) return "";
-  const mins = Math.round(deltaMs / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 48) return `${hrs} hour${hrs === 1 ? "" : "s"} ago`;
-  const days = Math.round(hrs / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
 }
 
 function rowStatus(slaPct: number | null): "HEALTHY" | "WARNING" {
@@ -98,13 +91,7 @@ async function batchOrgProducts(
   return map;
 }
 
-export function OrganizationsPage({
-  orgId,
-  onOrgChange,
-}: {
-  orgId: string;
-  onOrgChange?: (orgId: string) => void;
-}) {
+export function OrganizationsPage({ orgId }: { orgId: string }) {
   const authUser = useAuthStore((s) => s.user);
   const authOrgId = authUser?.org_id ? String(authUser.org_id) : null;
   const isSystemAdminUser =
@@ -113,7 +100,8 @@ export function OrganizationsPage({
     authUser?.user_id === "1" &&
     authUser?.role_id === "1" &&
     authUser?.user_type_id === "1";
-  const [tab, setTab] = useState<WorkspaceTab>("active");
+  const canModify = useScreenModifyAccess("organizations");
+  const modifyAccessMessage = "You don't have modify access";
   const [orgs, setOrgs] = useState<Organisation[]>([]);
   const [externalOrgs, setExternalOrgs] = useState<ExternalOrganization[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -125,14 +113,14 @@ export function OrganizationsPage({
   const [error, setError] = useState<string | null>(null);
   const [ticketMetrics, setTicketMetrics] =
     useState<OrganisationTicketMetricsPayload | null>(null);
-  const [recentAudit, setRecentAudit] = useState<AdminAuditLog[]>([]);
-
   const [selectedProductIds, setSelectedProductIds] = useState<Set<number>>(
     () => new Set()
   );
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  /** `null` = show all organizations */
+  const [orgFilterId, setOrgFilterId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState<number>(10);
 
   const [orgModalOpen, setOrgModalOpen] = useState(false);
   const [orgModalInitialId, setOrgModalInitialId] = useState<string | null>(
@@ -146,27 +134,28 @@ export function OrganizationsPage({
     setLoading(true);
     setError(null);
     try {
-      const [o, p, ext, metrics, audit] = await Promise.all([
+      const sync = await syncClientProductsFromExternal().catch(() => null);
+      if (sync) useUIStore.getState().setBrand(sync.is_ngo ? "ngo" : "ezii");
+      const [o, p, ext, metrics] = await Promise.all([
         listOrganisations(),
         listProducts(),
         getExternalOrganizations().catch(() => [] as ExternalOrganization[]),
         getSystemOrganisationTicketMetrics().catch(() => null),
-        listAdminAuditLogs({ limit: 5 }).catch(() => [] as AdminAuditLog[]),
       ]);
+      const externalOrgIds = new Set(ext.map((x) => normalizeOrgId(x.id)));
+      const matchedOrgs = o.filter((org) => externalOrgIds.has(normalizeOrgId(org.id)));
       const scopedOrgId = authOrgId ?? String(orgId);
       const scopedOrgs = isSystemAdminUser
-        ? o
-        : o.filter((org) => String(org.id) === scopedOrgId);
+        ? matchedOrgs
+        : matchedOrgs.filter((org) => normalizeOrgId(org.id) === normalizeOrgId(scopedOrgId));
       setOrgs(scopedOrgs);
       setProducts(p);
       setExternalOrgs(ext);
       setTicketMetrics(metrics);
-      setRecentAudit(Array.isArray(audit) ? audit : []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load organizations");
       setOrgs([]);
       setTicketMetrics(null);
-      setRecentAudit([]);
     } finally {
       setLoading(false);
     }
@@ -185,6 +174,11 @@ export function OrganizationsPage({
     void loadOrgs();
   }, [loadOrgs]);
 
+  useEffect(() => {
+    if (orgFilterId == null) return;
+    if (!orgs.some((o) => organisationIdNum(o.id) === orgFilterId)) setOrgFilterId(null);
+  }, [orgs, orgFilterId]);
+
   const rowsBase: RowModel[] = useMemo(() => {
     return orgs.map((org) => {
       const all = orgProductsMap[org.id] ?? [];
@@ -202,20 +196,45 @@ export function OrganizationsPage({
     });
   }, [orgs, orgProductsMap, ticketMetrics]);
 
+  const orgSelectOptions = useMemo(() => {
+    return [...orgs]
+      .sort((a, b) =>
+        safeOrganisationDisplayName(a, externalNameById).localeCompare(
+          safeOrganisationDisplayName(b, externalNameById),
+          undefined,
+          { sensitivity: "base" }
+        )
+      )
+      .map((org) => ({
+        id: organisationIdNum(org.id),
+        label: safeOrganisationDisplayName(org, externalNameById),
+      }));
+  }, [orgs, externalNameById]);
+
   const filteredRows = useMemo(() => {
-    if (tab === "archived") return [];
-    return rowsBase.filter((row) => {
-      if (statusFilter !== "ALL" && row.status !== statusFilter) return false;
-      if (selectedProductIds.size === 0) return true;
-      return row.enabledProducts.some((ep) =>
-        selectedProductIds.has(ep.product_id)
+    return rowsBase
+      .filter((row) => {
+        if (orgFilterId != null && organisationIdNum(row.org.id) !== orgFilterId) return false;
+        if (statusFilter !== "ALL" && row.status !== statusFilter) return false;
+        if (selectedProductIds.size === 0) return true;
+        return row.enabledProducts.some((ep) =>
+          selectedProductIds.has(ep.product_id)
+        );
+      })
+      .sort((a, b) =>
+        safeOrganisationDisplayName(a.org, externalNameById).localeCompare(
+          safeOrganisationDisplayName(b.org, externalNameById),
+          undefined,
+          { sensitivity: "base" }
+        )
       );
-    });
-  }, [rowsBase, tab, statusFilter, selectedProductIds]);
+  }, [rowsBase, orgFilterId, statusFilter, selectedProductIds, externalNameById]);
 
   const totalFiltered = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(totalFiltered / pageSize));
   const safePage = Math.min(page, totalPages);
+  const canGoPrev = safePage > 1;
+  const canGoNext = safePage < totalPages;
   const pageSlice = useMemo(() => {
     const start = (safePage - 1) * pageSize;
     return filteredRows.slice(start, start + pageSize);
@@ -223,7 +242,7 @@ export function OrganizationsPage({
 
   useEffect(() => {
     setPage(1);
-  }, [tab, statusFilter, selectedProductIds, orgs.length]);
+  }, [statusFilter, selectedProductIds, orgFilterId, orgs.length]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
@@ -254,23 +273,6 @@ export function OrganizationsPage({
 
   const globalSlaAll = ticketMetrics?.global.sla_attainment_pct ?? null;
 
-  const worstOrgBelowThreshold = useMemo(() => {
-    let w: RowModel | null = null;
-    for (const r of rowsBase) {
-      if (r.slaPct == null || r.slaPct >= 90) continue;
-      if (!w || r.slaPct < (w.slaPct ?? 0)) w = r;
-    }
-    return w;
-  }, [rowsBase]);
-
-  const recentActivityLine = useMemo(() => {
-    const log = recentAudit[0];
-    if (!log) return "No recent admin activity recorded yet.";
-    const rel = formatRelativeTime(log.created_at);
-    const tail = rel ? ` ${rel}.` : ".";
-    return `${log.module}: ${log.summary}${tail}`;
-  }, [recentAudit]);
-
   function toggleProductFilter(id: number) {
     setSelectedProductIds((prev) => {
       const next = new Set(prev);
@@ -283,6 +285,7 @@ export function OrganizationsPage({
   function clearFilters() {
     setSelectedProductIds(new Set());
     setStatusFilter("ALL");
+    setOrgFilterId(null);
   }
 
   const startIdx = totalFiltered === 0 ? 0 : (safePage - 1) * pageSize + 1;
@@ -326,136 +329,116 @@ export function OrganizationsPage({
             </p>
           </div>
           <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-            <div
-              className={cn(
-                "inline-flex rounded-xl border border-[#1E88E5]/25 bg-[#1E88E5]/10 p-1 backdrop-blur-md dark:border-[#1E88E5]/35 dark:bg-[#1E88E5]/15"
-              )}
-            >
+            
+            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
               <button
                 type="button"
-                onClick={() => setTab("active")}
-                className={cn(
-                  "rounded-lg px-4 py-2 text-xs font-semibold uppercase tracking-wide transition-all",
-                  tab === "active"
-                    ? "bg-white/90 text-[#475569] shadow-sm backdrop-blur-sm dark:bg-white/20 dark:text-foreground"
-                    : "text-slate-600 dark:text-muted-foreground"
-                )}
+                disabled={!canModify}
+                onClick={() => {
+                  setOrgModalInitialId(null);
+                  setOrgModalInitialName(null);
+                  setOrgModalOpen(true);
+                }}
+                className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-95 disabled:opacity-60"
+                style={{ backgroundColor: PRIMARY }}
               >
-                Active
+                <Plus className="h-4 w-4" />
+                Add New Organization
               </button>
-              <button
-                type="button"
-                onClick={() => setTab("archived")}
-                className={cn(
-                  "rounded-lg px-4 py-2 text-xs font-semibold uppercase tracking-wide transition-all",
-                  tab === "archived"
-                    ? "bg-white/90 text-[#475569] shadow-sm backdrop-blur-sm dark:bg-white/20 dark:text-foreground"
-                    : "text-slate-600 dark:text-muted-foreground"
-                )}
-              >
-                Archived
-              </button>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setOrgModalInitialId(null);
-                setOrgModalInitialName(null);
-                setOrgModalOpen(true);
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold text-white shadow-md transition hover:opacity-95"
-              style={{ backgroundColor: PRIMARY }}
-            >
-              <Plus className="h-4 w-4" />
-              Add New Organization
-            </button>
+            </InstantTooltip>
           </div>
         </div>
 
         <div className="mt-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          {tab === "active" ? (
-            <div
-              className={cn(
-                "w-full rounded-xl px-4 py-3 shadow-sm",
-                "md:flex md:items-center md:justify-between md:gap-4",
-                glassSubtle
-              )}
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-medium text-slate-500 dark:text-muted-foreground">
-                  Filter by product
-                </span>
-                {products.map((p) => {
-                  const on = selectedProductIds.has(p.id);
-                  return (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => toggleProductFilter(p.id)}
-                      className={cn(
-                        "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors",
-                        on
-                          ? "border-[#1E88E5] bg-[#1E88E5]/90 text-white shadow-sm backdrop-blur-sm dark:border-primary dark:bg-primary/90"
-                          : cn(
-                              "border-black/10 text-slate-700 dark:border-white/15 dark:text-foreground",
-                              "bg-white/50 backdrop-blur-sm hover:bg-white/70 dark:bg-white/5 dark:hover:bg-white/10"
-                            )
-                      )}
-                    >
-                      {p.code || p.name}
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-3 md:mt-0">
-                <label className="flex items-center gap-2 text-xs font-medium text-slate-600 dark:text-muted-foreground">
-                  <span className="uppercase tracking-wide">Status</span>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) =>
-                      setStatusFilter(e.target.value as StatusFilter)
-                    }
-                    className="rounded-lg border border-black/10 bg-white/60 px-2 py-1.5 text-xs font-medium backdrop-blur-sm dark:border-white/15 dark:bg-white/10"
-                  >
-                    <option value="ALL">All statuses</option>
-                    <option value="HEALTHY">Healthy</option>
-                    <option value="WARNING">Warning</option>
-                  </select>
-                </label>
+          <div
+            className={cn(
+              "w-full rounded-xl px-4 py-3 shadow-sm",
+              "md:flex md:items-center md:justify-between md:gap-4",
+              glassSubtle
+            )}
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-slate-500 dark:text-muted-foreground">
+                Filter by product
+              </span>
+              {selectedProductIds.size > 0 || orgFilterId != null ? (
                 <button
                   type="button"
                   onClick={clearFilters}
-                  className="text-xs font-semibold text-[#475569] underline-offset-2 hover:underline dark:text-primary"
+                  className="text-xs font-semibold text-[#1E88E5] underline-offset-2 hover:underline dark:text-sky-300"
                 >
                   Clear filters
                 </button>
-              </div>
+              ) : null}
+              {products.map((p) => {
+                const on = selectedProductIds.has(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => toggleProductFilter(p.id)}
+                    className={cn(
+                      "rounded-full border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition-colors",
+                      on
+                        ? "border-[#1E88E5] bg-[#1E88E5]/90 text-white shadow-sm backdrop-blur-sm dark:border-primary dark:bg-primary/90"
+                        : cn(
+                            "border-black/10 text-slate-700 dark:border-white/15 dark:text-foreground",
+                            "bg-white/50 backdrop-blur-sm hover:bg-white/70 dark:bg-white/5 dark:hover:bg-white/10"
+                          )
+                    )}
+                  >
+                    {p.code || p.name}
+                  </button>
+                );
+              })}
             </div>
-          ) : (
-            <div className="hidden lg:block" />
-          )}
+            {orgs.length > 1 ? (
+              <div className="flex w-full flex-col gap-1.5 sm:w-auto sm:min-w-[220px] sm:max-w-xs">
+                <span className="text-xs font-medium text-slate-500 dark:text-muted-foreground">
+                  Filter by organization
+                </span>
+                <select
+                  value={orgFilterId == null ? "" : String(orgFilterId)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === "") setOrgFilterId(null);
+                    else {
+                      const n = Number(v);
+                      setOrgFilterId(Number.isFinite(n) ? n : null);
+                    }
+                  }}
+                  className="w-full rounded-xl border border-black/10 bg-white/70 px-3 py-2 text-sm font-semibold text-slate-800 dark:border-white/10 dark:bg-white/10 dark:text-slate-100"
+                >
+                  <option value="">All organizations</option>
+                  {orgSelectOptions.map((o) => (
+                    <option key={o.id} value={String(o.id)}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : null}
+          </div>
           <div
             className={cn(
-              "w-full rounded-2xl border border-[#1E88E5]/35 bg-gradient-to-br from-[#1E88E5]/18 to-[#1E88E5]/6 p-4 shadow-[0_8px_28px_rgba(30,136,229,0.12)] backdrop-blur-xl dark:border-[#1E88E5]/40 dark:from-[#1E88E5]/25 dark:to-[#1E88E5]/8 lg:w-[350px] lg:shrink-0"
+              "w-full rounded-2xl border border-[#1E88E5]/35 bg-gradient-to-br from-[#1E88E5]/18 to-[#1E88E5]/6 p-2 shadow-[0_8px_28px_rgba(30,136,229,0.12)] backdrop-blur-xl dark:border-[#1E88E5]/40 dark:from-[#1E88E5]/25 dark:to-[#1E88E5]/8 lg:w-[350px] lg:shrink-0"
             )}
           >
-            <div className="grid grid-cols-2 gap-4 text-sm">
+            <div className="grid grid-cols-2 gap-2 text-sm">
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-[#475569]/80 dark:text-white/70">
                   Total clients
                 </div>
-                <div className="mt-1 text-2xl font-bold tabular-nums text-[#1E88E5] dark:text-white">
-                  {tab === "archived" ? 0 : orgs.length}
+                <div className="text-2xl font-bold tabular-nums text-[#1E88E5] dark:text-white">
+                  {orgs.length}
                 </div>
               </div>
               <div>
                 <div className="text-[10px] font-semibold uppercase tracking-wide text-[#475569]/80 dark:text-white/70">
                   Global SLA
                 </div>
-                <div className="mt-1 text-2xl font-bold tabular-nums text-[#1E88E5] dark:text-white">
-                  {tab === "archived" || globalSlaAll == null
-                    ? "—"
-                    : `${globalSlaAll}%`}
+                <div className="text-2xl font-bold tabular-nums text-[#1E88E5] dark:text-white">
+                  {globalSlaAll == null ? "—" : `${globalSlaAll}%`}
                 </div>
               </div>
             </div>
@@ -469,11 +452,6 @@ export function OrganizationsPage({
             </div>
           ) : error ? (
             <div className="p-6 text-sm text-red-600">{error}</div>
-          ) : tab === "archived" ? (
-            <div className="p-12 text-center text-sm text-slate-500">
-              No archived organizations. Archived tenants will appear here when
-              lifecycle APIs are enabled.
-            </div>
           ) : (
             <>
               {orgProductsLoading ? (
@@ -499,7 +477,7 @@ export function OrganizationsPage({
                         externalNameById
                       );
                       const orgIdLabel = Number.isFinite(Number(row.org.id))
-                        ? String(Number(row.org.id)).padStart(4, "0")
+                        ? String(Number(row.org.id)).padStart(1, "0")
                         : "0000";
                       return (
                       <tr
@@ -584,24 +562,26 @@ export function OrganizationsPage({
                           )}
                         </td>
                         <td className="px-4 py-4 text-right align-middle">
-                          <button
-                            type="button"
-                            title="Products & queues"
-                            onClick={() => {
-                              const id = String(row.org.id);
-                              setOrgModalInitialId(id);
-                              setOrgModalInitialName(displayName);
-                              setOrgModalOpen(true);
-                              onOrgChange?.(id);
-                            }}
-                            className={cn(
-                              "inline-flex rounded-lg p-2 text-slate-600 dark:text-muted-foreground",
-                              glassInteractive
-                            )}
-                            aria-label={`Configure ${displayName}`}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
+                          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                            <button
+                              type="button"
+                              disabled={!canModify}
+                              title="Products & queues"
+                              onClick={() => {
+                                const id = String(row.org.id);
+                                setOrgModalInitialId(id);
+                                setOrgModalInitialName(displayName);
+                                setOrgModalOpen(true);
+                              }}
+                              className={cn(
+                                "inline-flex rounded-lg p-2 text-slate-600 disabled:opacity-60 dark:text-muted-foreground",
+                                glassInteractive
+                              )}
+                              aria-label={`Configure ${displayName}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </button>
+                          </InstantTooltip>
                         </td>
                       </tr>
                       );
@@ -620,11 +600,64 @@ export function OrganizationsPage({
                 </table>
               </div>
               <div className="flex flex-col gap-3 border-t border-black/10 bg-white/25 px-4 py-3 text-xs text-slate-600 backdrop-blur-md dark:border-white/10 dark:bg-white/[0.06] dark:text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-                <span className="font-medium uppercase tracking-wide">
-                  Showing {startIdx} to {endIdx} of {totalFiltered}{" "}
-                  organizations
-                </span>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="font-medium uppercase tracking-wide">
+                    Showing {startIdx} to {endIdx} of {totalFiltered}{" "}
+                    organizations
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="org-page-size" className="text-[11px] font-medium uppercase tracking-wide">
+                      Per page
+                    </label>
+                    <select
+                      id="org-page-size"
+                      value={String(pageSize)}
+                      onChange={(e) => {
+                        const n = Number(e.target.value);
+                        setPageSize(Number.isFinite(n) ? n : 10);
+                        setPage(1);
+                      }}
+                      className="rounded-md border border-black/10 bg-white/70 px-2 py-1 text-xs font-semibold text-slate-800 dark:border-white/10 dark:bg-white/10 dark:text-slate-100"
+                    >
+                      {[10, 20, 50, 100].map((size) => (
+                        <option key={size} value={String(size)}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
                 <div className="flex flex-wrap items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPage(1)}
+                    disabled={!canGoPrev}
+                    className={cn(
+                      "inline-flex min-w-[2rem] items-center justify-center rounded-md px-2 py-1 text-xs font-semibold",
+                      canGoPrev
+                        ? "text-slate-700 hover:bg-white/60 dark:text-foreground dark:hover:bg-white/15"
+                        : "cursor-not-allowed opacity-50"
+                    )}
+                    aria-label="First page"
+                    title="First page"
+                  >
+                    <ChevronsLeft className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={!canGoPrev}
+                    className={cn(
+                      "inline-flex min-w-[2rem] items-center justify-center rounded-md px-2 py-1 text-xs font-semibold",
+                      canGoPrev
+                        ? "text-slate-700 hover:bg-white/60 dark:text-foreground dark:hover:bg-white/15"
+                        : "cursor-not-allowed opacity-50"
+                    )}
+                    aria-label="Previous page"
+                    title="Previous page"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
                   {pageNumbers.map((p, i) =>
                     p === "ellipsis" ? (
                       <span key={`e-${i}`} className="px-2">
@@ -649,65 +682,42 @@ export function OrganizationsPage({
                       </button>
                     )
                   )}
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={!canGoNext}
+                    className={cn(
+                      "inline-flex min-w-[2rem] items-center justify-center rounded-md px-2 py-1 text-xs font-semibold",
+                      canGoNext
+                        ? "text-slate-700 hover:bg-white/60 dark:text-foreground dark:hover:bg-white/15"
+                        : "cursor-not-allowed opacity-50"
+                    )}
+                    aria-label="Next page"
+                    title="Next page"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage(totalPages)}
+                    disabled={!canGoNext}
+                    className={cn(
+                      "inline-flex min-w-[2rem] items-center justify-center rounded-md px-2 py-1 text-xs font-semibold",
+                      canGoNext
+                        ? "text-slate-700 hover:bg-white/60 dark:text-foreground dark:hover:bg-white/15"
+                        : "cursor-not-allowed opacity-50"
+                    )}
+                    aria-label="Last page"
+                    title="Last page"
+                  >
+                    <ChevronsRight className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               </div>
             </>
           )}
         </GlassCard>
 
-        <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <GlassCard className="border-black/10 bg-white/20 p-4 supports-[backdrop-filter]:bg-white/25 dark:border-white/10 dark:bg-white/5">
-            <div className="flex gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-black/5 bg-white/50 backdrop-blur-sm dark:border-white/10 dark:bg-white/10">
-                <Clock className="h-5 w-5 text-slate-600 dark:text-muted-foreground" />
-              </div>
-              <div>
-                <div className="text-sm font-semibold text-[#475569] dark:text-foreground">
-                  Recent activity
-                </div>
-                <p className="mt-2 text-xs leading-relaxed text-slate-600 dark:text-muted-foreground">
-                  {recentActivityLine}
-                </p>
-              </div>
-            </div>
-          </GlassCard>
-          <GlassCard className="border-l-4 border-l-[#B91C1C] border-black/10 bg-white/20 p-4 supports-[backdrop-filter]:bg-white/25 dark:border-white/10 dark:bg-white/5">
-            <div className="flex gap-3">
-              <AlertTriangle className="h-5 w-5 shrink-0 text-[#B91C1C]" />
-              <div>
-                <div className="text-sm font-semibold text-[#B91C1C]">
-                  SLA critical alert
-                </div>
-                <p className="mt-2 text-xs leading-relaxed text-slate-700 dark:text-muted-foreground">
-                  {worstOrgBelowThreshold
-                    ? `${resolveOrganisationDisplayName(worstOrgBelowThreshold.org, externalNameById)} is below 90% resolution SLA attainment (completed tickets with a resolution due date).`
-                    : "No organizations are currently below the 90% resolution SLA attainment threshold."}
-                </p>
-              </div>
-            </div>
-          </GlassCard>
-          <GlassCard
-            className={cn(
-              "border border-[#1E88E5]/40 bg-gradient-to-br from-[#1E88E5]/35 to-[#1E88E5]/15 p-4 text-slate-900 shadow-lg backdrop-blur-xl dark:border-[#1E88E5]/50 dark:from-[#1E88E5]/30 dark:to-[#1E88E5]/10 dark:text-white"
-            )}
-          >
-            <div className="flex gap-3">
-              <Sparkles className="h-5 w-5 shrink-0 text-[#CC6C00] dark:text-amber-200" />
-              <div>
-                <div className="text-sm font-semibold">System health snapshot</div>
-                <p className="mt-2 text-xs leading-relaxed text-slate-700 dark:text-white/85">
-                  {ticketMetrics == null
-                    ? "Ticket metrics are unavailable (check system admin access)."
-                    : `Open tickets across all organizations: ${ticketMetrics.global.open_tickets.toLocaleString("en-IN")}. Weighted resolution SLA on completed tickets: ${
-                        ticketMetrics.global.sla_attainment_pct == null
-                          ? "—"
-                          : `${ticketMetrics.global.sla_attainment_pct}%`
-                      }.`}
-                </p>
-              </div>
-            </div>
-          </GlassCard>
-        </div>
       </div>
 
       <OrgProductAssignModal

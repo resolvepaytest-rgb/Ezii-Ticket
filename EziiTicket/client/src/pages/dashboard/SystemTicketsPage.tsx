@@ -1,12 +1,16 @@
 import { GlassCard } from "@components/common/GlassCard";
+import { Loader } from "@components/common/Loader";
 import { cn } from "@/lib/utils";
+import { getTicket, type TicketDetail } from "@/api/ticketApi";
 import {
   getSystemTicketFilterOptions,
+  listQueues,
   listSystemTickets,
+  type Queue,
   type SystemTicketRow,
   type SystemTicketFilterOptions,
 } from "@/api/adminApi";
-import { Filter, MoreVertical, Plus, X } from "lucide-react";
+import { Eye, Filter, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -54,25 +58,6 @@ function toggleStr(arr: string[], v: string): string[] {
 function idEquals(a: unknown, b: unknown) {
   if (a == null || b == null) return false;
   return Number(a) === Number(b);
-}
-
-function SlaBar({ level }: { level: "critical" | "warning" | "normal" | "none" }) {
-  const width =
-    level === "critical" ? "78%" : level === "warning" ? "55%" : level === "normal" ? "35%" : "0%";
-  const color =
-    level === "critical"
-      ? "#C81E1E"
-      : level === "warning"
-        ? "#CC6C00"
-        : level === "normal"
-          ? "#1E88E5"
-          : "#CBD5E1";
-
-  return (
-    <div className="h-1.5 w-full max-w-[95px] rounded-full bg-slate-200 dark:bg-slate-700/60">
-      <div className="h-full rounded-full" style={{ width, backgroundColor: color }} />
-    </div>
-  );
 }
 
 function orgCodeFromName(name: string) {
@@ -162,19 +147,16 @@ function SlaCountdownCell({ row }: { row: SystemTicketRow }) {
   const { label, level, isOverdue } = useSlaCountdown(row.next_sla_deadline_at, row.status);
 
   return (
-    <div className="space-y-1.5">
-      <div
-        className={cn(
-          "text-xs font-semibold tabular-nums",
-          level === "critical" || isOverdue ? "text-[#B91C1C] dark:text-red-400" : "text-slate-700 dark:text-slate-200"
-        )}
-      >
-        <span>{label}</span>
-        {isOverdue ? (
-          <span className="ml-1 text-[10px] font-medium text-[#B91C1C]/90 dark:text-red-400/90">overdue</span>
-        ) : null}
-      </div>
-      <SlaBar level={isOverdue ? "critical" : level} />
+    <div
+      className={cn(
+        "text-xs font-semibold tabular-nums",
+        level === "critical" || isOverdue ? "text-[#B91C1C] dark:text-red-400" : "text-slate-700 dark:text-slate-200"
+      )}
+    >
+      <span>{label}</span>
+      {isOverdue ? (
+        <span className="ml-1 text-[10px] font-medium text-[#B91C1C]/90 dark:text-red-400/90">overdue</span>
+      ) : null}
     </div>
   );
 }
@@ -182,13 +164,11 @@ function SlaCountdownCell({ row }: { row: SystemTicketRow }) {
 function KpiCard({
   label,
   value,
-  bar,
   labelClassName,
   valueClassName,
 }: {
   label: string;
   value: string;
-  bar: "critical" | "warning" | "normal" | "none";
   labelClassName?: string;
   valueClassName?: string;
 }) {
@@ -203,9 +183,6 @@ function KpiCard({
         {label}
       </div>
       <div className={cn("mt-2 text-4xl font-semibold text-slate-900 dark:text-white", valueClassName)}>{value}</div>
-      <div className="mt-3">
-        <SlaBar level={bar} />
-      </div>
     </div>
   );
 }
@@ -217,7 +194,11 @@ const SLA_OPTIONS: { value: string; label: string }[] = [
   { value: "no_deadline", label: "No SLA deadline" },
 ];
 
-export function SystemTicketsPage() {
+export function SystemTicketsPage({
+  onOpenTicket,
+}: {
+  onOpenTicket?: (ticketId: number) => void;
+}) {
   const [rows, setRows] = useState<SystemTicketRow[]>([]);
   const [total, setTotal] = useState(0);
   const [kpis, setKpis] = useState({
@@ -228,6 +209,10 @@ export function SystemTicketsPage() {
   });
   const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [detailOpenId, setDetailOpenId] = useState<number | null>(null);
+  const [detail, setDetail] = useState<TicketDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailQueues, setDetailQueues] = useState<Queue[]>([]);
   const [filterModalOpen, setFilterModalOpen] = useState(false);
   const [filterOptions, setFilterOptions] = useState<SystemTicketFilterOptions | null>(null);
   const [appliedFilters, setAppliedFilters] = useState<SystemTicketListFilters>(EMPTY_FILTERS);
@@ -246,6 +231,48 @@ export function SystemTicketsPage() {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!detailOpenId) {
+      setDetail(null);
+      setDetailQueues([]);
+      return;
+    }
+    setDetailLoading(true);
+    void getTicket(detailOpenId)
+      .then((d) => setDetail(d))
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : "Failed to load ticket detail");
+        setDetail(null);
+      })
+      .finally(() => setDetailLoading(false));
+  }, [detailOpenId]);
+
+  useEffect(() => {
+    if (!detail?.organisation_id) {
+      setDetailQueues([]);
+      return;
+    }
+    void listQueues(detail.organisation_id)
+      .then((rows) => setDetailQueues(rows))
+      .catch(() => setDetailQueues([]));
+  }, [detail?.organisation_id]);
+
+  const detailProductName = useMemo(() => {
+    if (!detail) return "-";
+    const fromRows = rows.find((r) => Number(r.id) === Number(detail.id))?.product_name;
+    if (fromRows?.trim()) return fromRows;
+    const fromFilters = filterOptions?.products.find((p) => idEquals(p.id, detail.product_id))?.name;
+    return fromFilters?.trim() || String(detail.product_id);
+  }, [detail, rows, filterOptions]);
+
+  const detailQueueName = useMemo(() => {
+    if (!detail?.queue_id) return "-";
+    return (
+      detailQueues.find((q) => Number(q.id) === Number(detail.queue_id))?.name ??
+      String(detail.queue_id)
+    );
+  }, [detail?.queue_id, detailQueues]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -321,26 +348,22 @@ export function SystemTicketsPage() {
             <KpiCard
               label="Total Active"
               value={kpis.total_active.toLocaleString()}
-              bar="normal"
               labelClassName="text-[#1E88E5] dark:text-[#93C5FD]"
             />
             <KpiCard
               label="P1 Critical"
               value={String(kpis.p1_critical)}
-              bar="critical"
               labelClassName="text-[#B91C1C] dark:text-[#FCA5A5]"
               valueClassName="text-[#B91C1C] dark:text-[#FCA5A5]"
             />
             <KpiCard
               label="SLA At Risk"
               value={String(kpis.sla_at_risk)}
-              bar="warning"
               labelClassName="text-[#8C4A00] dark:text-[#FDBA74]"
             />
             <KpiCard
               label="Avg Res."
               value={`${kpis.avg_resolution_hours.toFixed(1)}h`}
-              bar="normal"
             />
           </div>
         </div>
@@ -638,10 +661,12 @@ export function SystemTicketsPage() {
                       <td className="px-4 py-4 text-right">
                         <button
                           type="button"
+                          onClick={() => setDetailOpenId(row.id)}
                           className="inline-flex rounded-lg p-2 text-slate-600 hover:bg-white/60 dark:text-slate-300 dark:hover:bg-white/10"
-                          aria-label={`Open actions for ${row.ticket_code}`}
+                          aria-label={`View details for ${row.ticket_code}`}
+                          title="View details"
                         >
-                          <MoreVertical className="h-4 w-4" />
+                          <Eye className="h-4 w-4" />
                         </button>
                       </td>
                     </tr>
@@ -677,70 +702,136 @@ export function SystemTicketsPage() {
             </div>
           </div>
         </GlassCard>
-
-        <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-3">
-          <GlassCard className="border-black/10 bg-white/35 p-4 dark:border-white/10 dark:bg-white/[0.06] lg:col-span-2">
-            <div className="text-xl font-bold text-[#475569] dark:text-foreground">System Integrity Alerts</div>
-            <div className="mt-3 space-y-2">
-              <div className="rounded-xl border border-red-200/70 bg-red-50/70 p-3 dark:border-red-400/30 dark:bg-red-500/10">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-bold text-[#B91C1C]">Payroll API latency spike</div>
-                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                      Response times exceeding 2.5s for Acme Corp instances. Investigation in progress.
-                    </p>
-                  </div>
-                  <span className="text-[10px] font-semibold text-slate-500">2m ago</span>
+      </div>
+      {detailOpenId ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/10 dark:bg-zinc-950/90">
+            <div className="flex items-start justify-between gap-3 border-b border-black/10 px-5 py-4 dark:border-white/10">
+              <div>
+                <div className="text-[11px] font-semibold text-sky-600 dark:text-sky-400">
+                  {detail?.ticket_code ?? "Ticket"}
                 </div>
+                <h3 className="mt-0.5 text-base font-semibold text-[#1A202C] dark:text-foreground">
+                  {detail?.subject ?? "Loading..."}
+                </h3>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 dark:border-white/10 dark:bg-white/5">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-bold text-[#475569] dark:text-slate-200">SLA Logic recalculated</div>
-                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
-                      Monthly ticket thresholds for Tier 1 orgs have been successfully updated.
-                    </p>
-                  </div>
-                  <span className="text-[10px] font-semibold text-slate-500">45m ago</span>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDetailOpenId(null);
+                  setDetail(null);
+                }}
+                className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
-          </GlassCard>
 
-          <div className="rounded-2xl border border-[#0F5EA8]/70 bg-gradient-to-b from-[#0F5EA8] to-[#0B4F92] p-4 text-slate-50 shadow-[0_10px_24px_rgba(15,94,168,0.35)]">
-            <div className="text-xl font-bold text-white">Operational Command</div>
-            <p className="mt-1 text-xs text-sky-100">Internal tools for advanced system overrides.</p>
-            <div className="mt-4 space-y-2 text-sm">
+            <div className="max-h-[75vh] overflow-y-auto p-5">
+              {detailLoading ? (
+                <Loader label="Loading ticket detail..." size="sm" />
+              ) : !detail ? (
+                <div className="text-xs text-muted-foreground">Ticket detail unavailable.</div>
+              ) : (
+                <div className="space-y-5">
+                  {detail.description ? (
+                    <div className="rounded-xl border border-black/10 bg-white/60 p-3 text-sm dark:border-white/10 dark:bg-white/5">
+                      {detail.description}
+                    </div>
+                  ) : null}
+
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className={cn("rounded-full px-2 py-1 text-[10px] font-bold", statusBadgeClass(detail.status))}>
+                      {formatStatusLabel(detail.status)}
+                    </span>
+                    <span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-800 dark:bg-amber-500/15 dark:text-amber-300">
+                      Priority: {detail.priority}
+                    </span>
+                    <span className="rounded-full bg-sky-100 px-2 py-1 text-[10px] font-bold text-sky-800 dark:bg-sky-500/15 dark:text-sky-300">
+                      Organization: {detail.organisation_name ?? detail.organisation_id}
+                    </span>
+                    <span className="rounded-full bg-indigo-100 px-2 py-1 text-[10px] font-bold text-indigo-800 dark:bg-indigo-500/15 dark:text-indigo-300">
+                      Product: {detailProductName}
+                    </span>
+                    <span className="rounded-full bg-emerald-100 px-2 py-1 text-[10px] font-bold text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-300">
+                      Queue: {detailQueueName}
+                    </span>
+                  </div>
+
+                  <div>
+                    <div className="mb-2 text-sm font-semibold">Messages</div>
+                    {detail.messages.length === 0 ? (
+                      <div className="text-xs text-muted-foreground">No messages yet.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {detail.messages.map((m) => (
+                          <div
+                            key={m.id}
+                            className={cn(
+                              "rounded-xl border p-3 text-xs",
+                              m.author_type === "customer"
+                                ? "border-sky-200 bg-sky-50 text-slate-800 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-slate-100"
+                                : m.author_type === "agent"
+                                  ? "border-emerald-200 bg-emerald-50 text-slate-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-slate-100"
+                                  : "border-violet-200 bg-violet-50 text-slate-800 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-slate-100"
+                            )}
+                          >
+                            <div className="mb-1 font-semibold text-slate-700 dark:text-slate-200">
+                              {m.author_name || `User ${m.author_user_id ?? "-"}`} - {new Date(m.created_at).toLocaleString()}
+                            </div>
+                            <div className="whitespace-pre-wrap text-slate-700 dark:text-slate-200">{m.body}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                      <div className="mb-2 text-sm font-semibold">Attachments</div>
+                      {detail.attachments.length === 0 ? (
+                        <div className="text-xs text-muted-foreground">No attachments yet.</div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {detail.attachments.map((a) => (
+                            <div key={a.id} className="text-xs text-slate-700 dark:text-slate-200">
+                              {a.file_name}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="mb-2 text-sm font-semibold">Timeline</div>
+                      {detail.events.length === 0 ? (
+                        <div className="text-xs text-muted-foreground">No timeline events yet.</div>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {detail.events.slice(0, 12).map((e) => (
+                            <div key={e.id} className="text-xs text-slate-700 dark:text-slate-200">
+                              {e.event_type} - {new Date(e.created_at).toLocaleString()}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end border-t border-black/10 px-5 py-3 dark:border-white/10">
               <button
                 type="button"
-                className="block w-full rounded-lg border border-white/30 bg-white/10 px-3 py-2 text-left font-medium text-white hover:bg-white/15"
+                onClick={() => detailOpenId && onOpenTicket?.(detailOpenId)}
+                className="rounded-lg bg-[#0F5EA8] px-4 py-2 text-xs font-semibold text-white hover:bg-[#0d5290]"
               >
-                Org Permission Matrix
-              </button>
-              <button
-                type="button"
-                className="block w-full rounded-lg border border-white/30 bg-white/10 px-3 py-2 text-left font-medium text-white hover:bg-white/15"
-              >
-                Emergency Bypass Protocols
-              </button>
-              <button
-                type="button"
-                className="block w-full rounded-lg border border-white/30 bg-white/10 px-3 py-2 text-left font-medium text-white hover:bg-white/15"
-              >
-                System Log Auditor
+                Open full ticket page
               </button>
             </div>
           </div>
         </div>
-      </div>
-
-      <button
-        type="button"
-        className="fixed bottom-6 right-6 inline-flex h-12 w-12 items-center justify-center rounded-full bg-[#0A2F57] text-white shadow-xl"
-        aria-label="Create ticket action"
-      >
-        <Plus className="h-5 w-5" />
-      </button>
+      ) : null}
     </div>
   );
 }

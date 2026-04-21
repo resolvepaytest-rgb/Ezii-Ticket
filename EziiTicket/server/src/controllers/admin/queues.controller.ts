@@ -38,6 +38,39 @@ export async function listQueues(req: Request, res: Response) {
   return res.json({ ok: true, data: result.rows });
 }
 
+/** Per-queue counts of tickets in open, pending, or escalated status for one organisation. */
+export async function getQueueOpenTicketCounts(req: Request, res: Response) {
+  const organisationId = req.query.organisation_id ? asInt(req.query.organisation_id) : null;
+  if (!organisationId) {
+    return res.status(400).json({ ok: false, error: "organisation_id is required" });
+  }
+
+  if (!isEziiSystemAdmin(req)) {
+    const myOrgId = asInt(req.user?.org_id);
+    if (!myOrgId || myOrgId !== organisationId) {
+      return res.status(403).json({ ok: false, error: "forbidden" });
+    }
+  }
+
+  const result = await pool.query<{ queue_id: string | number; waiting_count: string | number }>(
+    `select t.queue_id, count(*)::int as waiting_count
+     from tickets t
+     where t.organisation_id = $1::bigint
+       and t.queue_id is not null
+       and t.status in ('open', 'pending', 'escalated')
+     group by t.queue_id`,
+    [organisationId]
+  );
+
+  return res.json({
+    ok: true,
+    data: result.rows.map((row) => ({
+      queue_id: Number(row.queue_id),
+      waiting_count: Number(row.waiting_count),
+    })),
+  });
+}
+
 export async function createQueue(req: Request, res: Response) {
   const { organisation_id, product_id, team_id, name, create_for_all_organisations } = req.body ?? {};
   const orgId = asInt(organisation_id);
@@ -75,6 +108,9 @@ export async function createQueue(req: Request, res: Response) {
       baseTeamProductId = baseTeam.product_id ? Number(baseTeam.product_id) : null;
     }
 
+    const effectiveProductId =
+      productId != null ? productId : baseTeamProductId != null ? baseTeamProductId : null;
+
     const result = await pool.query(
       `insert into queues (organisation_id, product_id, team_id, name)
        select
@@ -102,8 +138,17 @@ export async function createQueue(req: Request, res: Response) {
          where q.organisation_id = o.id
            and lower(q.name) = lower($4::text)
        )
+       and (
+         $5::bigint is null
+         or not exists (
+           select 1
+           from queues q2
+           where q2.organisation_id = o.id
+             and q2.product_id = $5::bigint
+         )
+       )
        returning id, organisation_id, product_id, team_id, name, created_at, updated_at`,
-      [productId, baseTeamProductId, baseTeamName, name]
+      [productId, baseTeamProductId, baseTeamName, name, effectiveProductId]
     );
 
     for (const row of result.rows as {
@@ -126,6 +171,19 @@ export async function createQueue(req: Request, res: Response) {
       `Created global queue "${name}" across ${result.rowCount ?? 0} org(s)`
     );
     return res.status(201).json({ ok: true, data: result.rows });
+  }
+
+  if (productId) {
+    const dup = await pool.query(
+      `select 1 from queues where organisation_id = $1::bigint and product_id = $2::bigint limit 1`,
+      [orgId, productId]
+    );
+    if (dup.rowCount && dup.rowCount > 0) {
+      return res.status(409).json({
+        ok: false,
+        error: "this organisation already has a queue for that product (max one per product)",
+      });
+    }
   }
 
   const result = await pool.query(
@@ -167,6 +225,38 @@ export async function updateQueue(req: Request, res: Response) {
       ? null
       : asInt(body.team_id)
     : undefined;
+
+  const existingRes = await pool.query<{ organisation_id: string; product_id: string | null }>(
+    `select organisation_id, product_id from queues where id = $1`,
+    [id]
+  );
+  const existing = existingRes.rows[0];
+  if (!existing) return res.status(404).json({ ok: false, error: "not found" });
+
+  const orgIdNum = Number(existing.organisation_id);
+  const nextProductId =
+    Object.prototype.hasOwnProperty.call(body, "product_id") && (product_id === null || product_id === "")
+      ? null
+      : productId != null
+        ? productId
+        : existing.product_id != null
+          ? Number(existing.product_id)
+          : null;
+
+  if (nextProductId != null && Number.isFinite(nextProductId)) {
+    const clash = await pool.query(
+      `select 1 from queues
+       where organisation_id = $1::bigint and product_id = $2::bigint and id <> $3::bigint
+       limit 1`,
+      [orgIdNum, nextProductId, id]
+    );
+    if (clash.rowCount && clash.rowCount > 0) {
+      return res.status(409).json({
+        ok: false,
+        error: "this organisation already has a queue for that product (max one per product)",
+      });
+    }
+  }
 
   const result = await pool.query(
     `update queues

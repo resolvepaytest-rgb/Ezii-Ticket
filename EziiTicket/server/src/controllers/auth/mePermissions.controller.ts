@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import { pool } from "../../db/pool.js";
 import { asInt } from "../admin/adminUtils.js";
-import { ACTION_KEYS, SCREEN_KEYS } from "../../authz/permissionKeys.js";
+import { SCREEN_KEYS } from "../../authz/permissionKeys.js";
 import { buildScreenAccess } from "../../authz/permissionSchema.js";
 import { isEziiSystemAdmin } from "../admin/eziiSystemAdmin.js";
 
@@ -18,54 +18,6 @@ function asPermissionDoc(input: unknown): PermissionDoc {
 
 function toBool(v: unknown): boolean {
   return Boolean(v);
-}
-
-function accessRank(v: unknown): number {
-  const s = String(v ?? "").trim().toLowerCase();
-  if (s === "own_tickets") return 1;
-  if (s === "assigned_queue") return 2;
-  if (s === "product_queue_escalated") return 3;
-  if (s === "org_tickets") return 4;
-  if (s === "all_tickets") return 5;
-  return 0;
-}
-
-function rankToAccess(rank: number): string {
-  if (rank >= 5) return "all_tickets";
-  if (rank === 4) return "org_tickets";
-  if (rank === 3) return "product_queue_escalated";
-  if (rank === 2) return "assigned_queue";
-  if (rank === 1) return "own_tickets";
-  return "own_tickets";
-}
-
-function assignScopeRank(v: unknown): number {
-  const s = String(v ?? "").trim().toLowerCase();
-  if (s === "none") return 0;
-  if (s === "self") return 1;
-  if (s === "l2_queue") return 2;
-  if (s === "any") return 3;
-  return 0;
-}
-
-function rankToAssignScope(rank: number): string {
-  if (rank >= 3) return "any";
-  if (rank === 2) return "l2_queue";
-  if (rank === 1) return "self";
-  return "none";
-}
-
-function slaRank(v: unknown): number {
-  const s = String(v ?? "").trim().toLowerCase();
-  if (s === "edit") return 2;
-  if (s === "view") return 1;
-  return 0;
-}
-
-function rankToSla(rank: number): "none" | "view" | "edit" {
-  if (rank >= 2) return "edit";
-  if (rank === 1) return "view";
-  return "none";
 }
 
 function readScreenAccess(
@@ -103,71 +55,24 @@ function writeScreenAccess(input: Record<string, { view: boolean; modify: boolea
   return out;
 }
 
-function readActions(value: unknown): Record<string, boolean> {
-  const out: Record<string, boolean> = {};
-  const source = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
-  for (const [k, v] of Object.entries(source)) {
-    out[k] = Boolean(v);
-  }
-  return out;
-}
-
-/** End users must not get staff-only org queue list; UI treats `tickets.list` as agent/org shell. */
-function applyCustomerEndUserActionCaps(doc: PermissionDoc): PermissionDoc {
-  const next: PermissionDoc = { ...doc };
-  const actions: Record<string, boolean> = {};
-  const raw = readActions(next.actions);
-  for (const key of ACTION_KEYS) {
-    actions[key] = Boolean(raw[key]);
-  }
-  actions["tickets.list"] = false;
-  next.actions = actions;
-  return next;
-}
-
 function mergePermissionDocs(docs: PermissionDoc[]): PermissionDoc {
   if (docs.length === 0) return {};
 
-  let ticketAccessMax = 0;
-  let assignScopeMax = 0;
-  let canAssign = false;
-  let canResolve = false;
-  let t1 = 0;
-  let t2 = 0;
   const screen: Record<string, { view: boolean; modify: boolean }> = {};
-  const actions: Record<string, boolean> = {};
   for (const key of SCREEN_KEYS) screen[key] = { view: false, modify: false };
-  for (const key of ACTION_KEYS) actions[key] = false;
 
   for (const d of docs) {
-    ticketAccessMax = Math.max(ticketAccessMax, accessRank(d["ticket_access"]));
-    assignScopeMax = Math.max(assignScopeMax, assignScopeRank(d["assign_scope"]));
-    canAssign = canAssign || toBool(d["can_assign"]);
-    canResolve = canResolve || toBool(d["can_resolve"]);
-    t1 = Math.max(t1, slaRank(d["tier1_sla_config"]));
-    t2 = Math.max(t2, slaRank(d["tier2_sla_config"]));
     const s = readScreenAccess(d["screen_access"]);
-    const a = readActions(d["actions"]);
     for (const key of SCREEN_KEYS) {
       screen[key] = {
         view: screen[key].view || s[key].view || s[key].modify,
         modify: screen[key].modify || s[key].modify,
       };
     }
-    for (const [k, v] of Object.entries(a)) {
-      actions[k] = Boolean(actions[k] || v);
-    }
   }
 
   return {
-    ticket_access: rankToAccess(ticketAccessMax),
-    assign_scope: rankToAssignScope(assignScopeMax),
-    can_assign: canAssign,
-    can_resolve: canResolve,
-    tier1_sla_config: rankToSla(t1),
-    tier2_sla_config: rankToSla(t2),
     screen_access: writeScreenAccess(screen),
-    actions,
   };
 }
 
@@ -219,7 +124,6 @@ export async function getAuthMePermissions(req: Request, res: Response) {
         role_name: "system_admin",
         permissions_json: {
           screen_access: fullScreenAccess(),
-          actions: Object.fromEntries(ACTION_KEYS.map((k) => [k, true])),
         },
       },
     });
@@ -303,11 +207,8 @@ export async function getAuthMePermissions(req: Request, res: Response) {
     ? {
         ...withOverrides,
         screen_access: fullScreenAccess(),
-        actions: Object.fromEntries(ACTION_KEYS.map((k) => [k, true])),
       }
-    : customerRows.length > 0
-      ? applyCustomerEndUserActionCaps(withOverrides)
-      : withOverrides;
+    : withOverrides;
 
   return res.json({
     ok: true,

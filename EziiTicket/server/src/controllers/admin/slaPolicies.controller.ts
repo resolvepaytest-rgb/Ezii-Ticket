@@ -1,7 +1,6 @@
 import type { Request, Response } from "express";
 import { pool } from "../../db/pool.js";
 import { asInt } from "./adminUtils.js";
-import { isEziiSystemAdmin } from "./eziiSystemAdmin.js";
 import { appendAdminAudit } from "./adminAudit.js";
 import { resolveTier1Bound, type PriorityKey } from "./slaTier1Bounds.js";
 
@@ -9,9 +8,6 @@ function normTier(t: unknown): string {
   return String(t ?? "tier1").toLowerCase() === "tier2" ? "tier2" : "tier1";
 }
 
-function isEziiOrg(organisationId: number): boolean {
-  return organisationId === 1;
-}
 const GLOBAL_SLA_ORG_ID = 1;
 
 /** Internal Ezii (Tier 2): Tier 1 targets must not be faster than L2 acknowledgement / L3 resolution floor. */
@@ -50,14 +46,12 @@ async function validateTier1Bounds(
 
 export async function listSlaPolicies(req: Request, res: Response) {
   const requestedOrgId = req.query.organisation_id ? asInt(req.query.organisation_id) : null;
-  const includeTier2 = isEziiSystemAdmin(req);
   const result = await pool.query(
     `select id, organisation_id, name, tier, priority, first_response_mins, resolution_mins, warning_percent, is_active, metadata_json, created_at, updated_at
      from sla_policies
      where ($1::bigint is null or organisation_id = $1::bigint)
-       and ($2::boolean = true or lower(tier) <> 'tier2')
      order by organisation_id asc, tier asc, priority asc, id asc`,
-    [requestedOrgId, includeTier2]
+    [requestedOrgId]
   );
   return res.json({ ok: true, data: result.rows });
 }
@@ -75,12 +69,6 @@ export async function createSlaPolicy(req: Request, res: Response) {
     metadata_json,
   } = req.body ?? {};
 
-  if (!isEziiSystemAdmin(req)) {
-    return res.status(403).json({
-      ok: false,
-      error: "Only Ezii System Admin can create SLA policies.",
-    });
-  }
   const orgIdRaw = asInt(organisation_id);
   const orgId = orgIdRaw ?? GLOBAL_SLA_ORG_ID;
   if (!name || typeof name !== "string") return res.status(400).json({ ok: false, error: "name is required" });
@@ -93,12 +81,8 @@ export async function createSlaPolicy(req: Request, res: Response) {
 
   const requestedTier = normTier(tier);
   const requestedPriority = normPriority(priority);
-  if (requestedTier === "tier2" && !isEziiOrg(orgId)) {
-    return res.status(400).json({
-      ok: false,
-      error: "Tier 2 SLA policies are global-only (organisation_id=1).",
-    });
-  }
+  const { ensureTenantAndDefaultsByOrgId } = await import("../../services/provisioning/ensureTenantAndDefaults.js");
+  await ensureTenantAndDefaultsByOrgId(orgId);
   if (requestedTier === "tier1") {
     const rangeError = await validateTier1Bounds(orgId, requestedPriority, first_response_mins, resolution_mins);
     if (rangeError) {
@@ -136,13 +120,139 @@ export async function createSlaPolicy(req: Request, res: Response) {
   return res.status(201).json({ ok: true, data: row });
 }
 
-export async function updateSlaPolicy(req: Request, res: Response) {
-  if (!isEziiSystemAdmin(req)) {
-    return res.status(403).json({
-      ok: false,
-      error: "Only Ezii System Admin can update SLA policies.",
-    });
+export async function upsertSlaPoliciesBatch(req: Request, res: Response) {
+  const organisationId = asInt(req.body?.organisation_id);
+  const items = Array.isArray(req.body?.policies) ? (req.body.policies as unknown[]) : null;
+  if (!organisationId) return res.status(400).json({ ok: false, error: "organisation_id is required" });
+  if (!items) return res.status(400).json({ ok: false, error: "policies must be an array" });
+
+  const { ensureTenantAndDefaultsByOrgId } = await import("../../services/provisioning/ensureTenantAndDefaults.js");
+  await ensureTenantAndDefaultsByOrgId(organisationId);
+
+  const existing = await pool.query(
+    "select id, tier, priority, first_response_mins, resolution_mins from sla_policies where organisation_id = $1::bigint order by id desc",
+    [organisationId]
+  );
+  const byKey = new Map<string, number>();
+  const duplicateIdsByKey = new Map<string, number[]>();
+  const existingTier2ByPriority = new Map<PriorityKey, { first_response_mins: number; resolution_mins: number }>();
+  for (const row of existing.rows) {
+    const tier = normTier(row.tier);
+    const priority = normPriority(row.priority);
+    const key = `${tier}:${priority}`;
+    const id = Number(row.id);
+    if (!byKey.has(key)) {
+      byKey.set(key, id);
+      if (tier === "tier2") {
+        existingTier2ByPriority.set(priority, {
+          first_response_mins: Number(row.first_response_mins),
+          resolution_mins: Number(row.resolution_mins),
+        });
+      }
+      continue;
+    }
+    const dup = duplicateIdsByKey.get(key) ?? [];
+    dup.push(id);
+    duplicateIdsByKey.set(key, dup);
   }
+
+  const requestedTier2ByPriority = new Map<PriorityKey, { first_response_mins: number; resolution_mins: number }>();
+  for (const raw of items) {
+    const data = (raw ?? {}) as Record<string, unknown>;
+    if (normTier(data.tier) !== "tier2") continue;
+    const priority = normPriority(data.priority);
+    const firstResponseMins = Number(data.first_response_mins);
+    const resolutionMins = Number(data.resolution_mins);
+    if (Number.isFinite(firstResponseMins) && Number.isFinite(resolutionMins)) {
+      requestedTier2ByPriority.set(priority, {
+        first_response_mins: firstResponseMins,
+        resolution_mins: resolutionMins,
+      });
+    }
+  }
+
+  let created = 0;
+  let updated = 0;
+  for (const raw of items) {
+    const data = (raw ?? {}) as Record<string, unknown>;
+    const tier = normTier(data.tier);
+    const priority = normPriority(data.priority);
+    const firstResponseMins = Number(data.first_response_mins);
+    const resolutionMins = Number(data.resolution_mins);
+    if (!Number.isFinite(firstResponseMins) || !Number.isFinite(resolutionMins)) {
+      return res.status(400).json({ ok: false, error: `${tier}/${priority}: invalid minutes` });
+    }
+    if (tier === "tier1") {
+      const rangeError = await validateTier1Bounds(organisationId, priority, firstResponseMins, resolutionMins);
+      if (rangeError) {
+        return res.status(400).json({
+          ok: false,
+          error: `${rangeError} Tier 1 cannot be more aggressive than Tier 2 for the same priority.`,
+        });
+      }
+      const tier2ForPriority =
+        requestedTier2ByPriority.get(priority) ??
+        existingTier2ByPriority.get(priority) ?? {
+          first_response_mins: TIER2_BASELINE_BY_PRIORITY[priority].firstResponseMins,
+          resolution_mins: TIER2_BASELINE_BY_PRIORITY[priority].resolutionMins,
+        };
+      if (firstResponseMins < tier2ForPriority.first_response_mins || resolutionMins < tier2ForPriority.resolution_mins) {
+        return res.status(400).json({
+          ok: false,
+          error:
+            `Tier 1 for ${priority} cannot be more aggressive than Tier 2. ` +
+            `Tier 1 requires first_response_mins >= ${tier2ForPriority.first_response_mins} and resolution_mins >= ${tier2ForPriority.resolution_mins}.`,
+        });
+      }
+    }
+    const warningPercent = typeof data.warning_percent === "number" ? data.warning_percent : 75;
+    const isActive = typeof data.is_active === "boolean" ? data.is_active : true;
+    const name = typeof data.name === "string" && data.name.trim() ? data.name.trim() : `Org ${organisationId} ${priority} ${tier === "tier1" ? "Tier1" : "Tier2"}`;
+    const metadata_json =
+      data.metadata_json === undefined || data.metadata_json === null
+        ? null
+        : typeof data.metadata_json === "string"
+          ? data.metadata_json
+          : JSON.stringify(data.metadata_json);
+
+    const key = `${tier}:${priority}`;
+    const existingId = byKey.get(key);
+    if (existingId) {
+      await pool.query(
+        `update sla_policies
+         set name=$2, first_response_mins=$3, resolution_mins=$4, warning_percent=$5, is_active=$6, metadata_json=$7, updated_at=now()
+         where id=$1`,
+        [existingId, name, firstResponseMins, resolutionMins, warningPercent, isActive, metadata_json]
+      );
+      updated += 1;
+      const duplicateIds = duplicateIdsByKey.get(key) ?? [];
+      if (duplicateIds.length) {
+        await pool.query("delete from sla_policies where id = any($1::bigint[])", [duplicateIds]);
+      }
+    } else {
+      const ins = await pool.query(
+        `insert into sla_policies
+          (organisation_id, name, tier, priority, first_response_mins, resolution_mins, warning_percent, is_active, metadata_json)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+         returning id`,
+        [organisationId, name, tier, priority, firstResponseMins, resolutionMins, warningPercent, isActive, metadata_json]
+      );
+      byKey.set(key, Number(ins.rows[0].id));
+      created += 1;
+    }
+  }
+
+  await appendAdminAudit(
+    req,
+    organisationId,
+    "SLA Policies",
+    "update",
+    `Batch upserted SLA policies for org ${organisationId} (created ${created}, updated ${updated})`
+  );
+  return res.json({ ok: true, data: { organisation_id: organisationId, created, updated } });
+}
+
+export async function updateSlaPolicy(req: Request, res: Response) {
   const id = asInt(req.params.id);
   if (!id) return res.status(400).json({ ok: false, error: "invalid id" });
 
@@ -176,30 +286,6 @@ export async function updateSlaPolicy(req: Request, res: Response) {
   const effectiveResolution =
     typeof resolution_mins === "number" ? resolution_mins : Number(existingResolution);
 
-  if (effectiveTier === "tier2" && existingOrgId != null && isEziiOrg(existingOrgId)) {
-    const frChanged =
-      typeof first_response_mins === "number" && first_response_mins !== Number(existingFirstResponse);
-    const resChanged =
-      typeof resolution_mins === "number" && resolution_mins !== Number(existingResolution);
-    const timingChange = frChanged || resChanged;
-    const existingMetaStr =
-      existing.rows[0]?.metadata_json == null ? null : String(existing.rows[0].metadata_json);
-    let metaChange = false;
-    if (metadata_json !== undefined) {
-      const nextMetaStr =
-        metadata_json === null ? null : typeof metadata_json === "string" ? metadata_json : JSON.stringify(metadata_json);
-      metaChange = nextMetaStr !== existingMetaStr;
-    }
-    const tierChange = tier != null;
-    const priChange = priority != null;
-    if (timingChange || metaChange || tierChange || priChange) {
-      return res.status(403).json({
-        ok: false,
-        error: "Tier 2 internal SLA targets are fixed by Ezii and cannot be edited.",
-      });
-    }
-  }
-
   if (effectiveTier === "tier1") {
     const orgForBounds = existingOrgId ?? GLOBAL_SLA_ORG_ID;
     const rangeError = await validateTier1Bounds(orgForBounds, effectivePriority, effectiveFirstResponse, effectiveResolution);
@@ -209,13 +295,6 @@ export async function updateSlaPolicy(req: Request, res: Response) {
         error: `${rangeError} Tier 1 cannot be more aggressive than Tier 2 for the same priority.`,
       });
     }
-  }
-
-  if (effectiveTier === "tier2" && existingOrgId != null && !isEziiOrg(existingOrgId)) {
-    return res.status(403).json({
-      ok: false,
-      error: "Tier 2 SLA policies are global-only (org_id=1).",
-    });
   }
 
   const metaUpdate =
@@ -265,26 +344,11 @@ export async function updateSlaPolicy(req: Request, res: Response) {
 }
 
 export async function deleteSlaPolicy(req: Request, res: Response) {
-  if (!isEziiSystemAdmin(req)) {
-    return res.status(403).json({
-      ok: false,
-      error: "Only Ezii System Admin can delete SLA policies.",
-    });
-  }
   const id = asInt(req.params.id);
   if (!id) return res.status(400).json({ ok: false, error: "invalid id" });
 
   const existing = await pool.query("select tier, organisation_id, name from sla_policies where id=$1", [id]);
   if (!existing.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
-  const existingOrgId = existing.rows[0].organisation_id ? Number(existing.rows[0].organisation_id) : null;
-  const existingTierNorm = normTier(existing.rows[0].tier);
-  if (existingTierNorm === "tier2" && existingOrgId != null && !isEziiOrg(existingOrgId)) {
-    return res.status(403).json({
-      ok: false,
-      error: "Tier 2 SLA policies are global-only (org_id=1).",
-    });
-  }
-
   const result = await pool.query("delete from sla_policies where id=$1 returning id", [id]);
   if (!result.rows[0]) return res.status(404).json({ ok: false, error: "not found" });
   await appendAdminAudit(

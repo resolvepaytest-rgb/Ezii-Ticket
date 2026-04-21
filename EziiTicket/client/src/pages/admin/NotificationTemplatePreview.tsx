@@ -1,9 +1,8 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import remarkGfm from "remark-gfm";
-import { applySamplePlaceholders } from "./notificationPreviewUtils";
 import { buildEmailPreviewDocument, escapeHtml, isEmailHtmlBody } from "./emailPreviewDocument";
 
 const bodyComponents: Components = {
@@ -114,15 +113,93 @@ function EmailChromeFrame({
   );
 }
 
-export function NotificationTemplatePreview({ subject, body }: { subject: string; body: string }) {
-  const previewSubject = useMemo(
-    () => applySamplePlaceholders(subject.trim() || "(No subject)"),
-    [subject]
+function normalizeToken(raw: string): string | null {
+  const cleaned = raw.trim().replace(/^\{\{\s*|\s*\}\}$/g, "").trim();
+  if (!cleaned) return null;
+  if (!/^[a-zA-Z0-9_.-]+$/.test(cleaned)) return null;
+  return `{{${cleaned}}}`;
+}
+
+function htmlToPlainText(input: string): string {
+  return input
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|tr|h1|h2|h3|h4|h5|h6)>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+type NotificationTemplatePreviewProps = {
+  subject: string;
+  body: string;
+  onChangeSubject?: (next: string) => void;
+  onChangeBody?: (next: string) => void;
+  insertOptions?: Array<{ token: string; label: string }>;
+};
+
+export function NotificationTemplatePreview({
+  subject,
+  body,
+  onChangeSubject,
+  onChangeBody,
+  insertOptions = [],
+}: NotificationTemplatePreviewProps): React.JSX.Element {
+  const sourceSubject = subject.trim() || "(No subject)";
+  const sourceBody = body.trim() || "*No body content yet.*";
+  const canEditSource = Boolean(onChangeSubject && onChangeBody);
+  const isHtmlSource = useMemo(() => isEmailHtmlBody(body), [body]);
+  const bodyCodeText = useMemo(
+    () => (isHtmlSource ? htmlToPlainText(body) : body),
+    [body, isHtmlSource]
   );
-  const previewBody = useMemo(
-    () => applySamplePlaceholders(body.trim() || "*No body content yet.*"),
-    [body]
+
+  const placeholderTokens = useMemo(() => {
+    const matches = `${sourceSubject}\n${sourceBody}`.match(/\{\{\s*[\w.]+\s*\}\}/g) ?? [];
+    return Array.from(new Set(matches.map((t) => t.trim())));
+  }, [sourceSubject, sourceBody]);
+
+  const [previewValues, setPreviewValues] = useState<Record<string, string>>({});
+  const [manualTokens, setManualTokens] = useState<string[]>([]);
+  const [selectedInsertToken, setSelectedInsertToken] = useState<string>(insertOptions[0]?.token ?? "{{ticket_id}}");
+
+  const allTokens = useMemo(
+    () => Array.from(new Set([...placeholderTokens, ...manualTokens])),
+    [placeholderTokens, manualTokens]
   );
+
+  const previewSubject = useMemo(() => {
+    let rendered = sourceSubject;
+    for (const token of allTokens) {
+      rendered = rendered.split(token).join(previewValues[token] ?? token);
+    }
+    return rendered;
+  }, [sourceSubject, allTokens, previewValues]);
+
+  const previewBody = useMemo(() => {
+    let rendered = sourceBody;
+    for (const token of allTokens) {
+      rendered = rendered.split(token).join(previewValues[token] ?? token);
+    }
+    return rendered;
+  }, [sourceBody, allTokens, previewValues]);
+
+  function insertSelectedToken() {
+    const token = normalizeToken(selectedInsertToken) ?? selectedInsertToken;
+    if (!token) return;
+    if (onChangeBody) onChangeBody(`${body}${body ? "\n" : ""}${token}`);
+    setPreviewValues((prev) => ({ ...prev, [token]: prev[token] ?? token }));
+    setManualTokens((prev) => (prev.includes(token) ? prev : [...prev, token]));
+  }
 
   const iframeSrcDoc = useMemo(() => {
     if (!isEmailHtmlBody(previewBody)) return null;
@@ -133,31 +210,84 @@ export function NotificationTemplatePreview({ subject, body }: { subject: string
     <div className="rounded-2xl border border-black/10 bg-slate-50/80 p-4 sm:p-5 dark:border-white/10 dark:bg-white/[0.04]">
       <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Preview</div>
       <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-500">
-        Email client view with sample data. Sent mail uses live values from your system.
+        Email client preview. Variables use token names by default and are editable below.
       </p>
 
-      <div className="mt-4 min-w-0">
-        {iframeSrcDoc ? (
-          <iframe
-            title="Email preview"
-            className="h-[min(720px,75vh)] w-full min-w-0 rounded-xl border border-black/10 bg-white dark:border-white/10"
-            sandbox="allow-same-origin"
-            srcDoc={iframeSrcDoc}
+      <div className="mt-3 grid gap-2 rounded-xl border border-black/10 bg-white/70 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          Preview Text
+        </div>
+        <label className="grid gap-1">
+          <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">Subject</span>
+          <input
+            value={subject}
+            onChange={(e) => onChangeSubject?.(e.target.value)}
+            disabled={!canEditSource}
+            className="rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[#1E88E5]/40 disabled:opacity-70 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
           />
-        ) : (
-          <EmailChromeFrame previewSubjectPlain={previewSubject}>
-            <div className="max-h-[min(70vh,520px)] overflow-y-auto pr-1">
-              <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw]}
-                components={bodyComponents}
-              >
-                {previewBody}
-              </ReactMarkdown>
+        </label>
+        <div className="grid gap-3 md:grid-cols-2">
+          <label className="grid gap-1">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">Body Code</span>
+              <div className="inline-flex items-center gap-1">
+                <select
+                  value={selectedInsertToken}
+                  onChange={(e) => setSelectedInsertToken(e.target.value)}
+                  className="rounded-lg border border-black/10 bg-white px-2 py-1 text-[11px] dark:border-white/15 dark:bg-white/10"
+                >
+                  {(insertOptions.length > 0 ? insertOptions : allTokens.map((t) => ({ token: t, label: t }))).map((item) => (
+                    <option key={item.token} value={item.token}>
+                      {item.label} ({item.token})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={insertSelectedToken}
+                  className="rounded-lg bg-[#1E88E5] px-2.5 py-1 text-[11px] font-semibold text-white"
+                >
+                  Insert Variable
+                </button>
+              </div>
             </div>
-          </EmailChromeFrame>
-        )}
+            <textarea
+              value={isHtmlSource ? bodyCodeText : body}
+              onChange={(e) => onChangeBody?.(e.target.value)}
+              disabled={!canEditSource}
+              rows={12}
+              className="min-h-[280px] resize-y rounded-lg border border-black/10 bg-white px-2.5 py-1.5 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-[#1E88E5]/40 disabled:opacity-70 dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
+            />
+          </label>
+
+          <div className="grid gap-1">
+            <span className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">Body Preview</span>
+            {iframeSrcDoc ? (
+              <iframe
+                title="Email preview"
+                className="h-[420px] w-full min-w-0 rounded-xl border border-black/10 bg-white dark:border-white/10"
+                sandbox="allow-same-origin"
+                srcDoc={iframeSrcDoc}
+              />
+            ) : (
+              <div className="h-[420px] overflow-auto rounded-xl border border-black/10 dark:border-white/10">
+                <EmailChromeFrame previewSubjectPlain={previewSubject}>
+                  <div className="max-h-full overflow-y-auto pr-1">
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      rehypePlugins={[rehypeRaw]}
+                      components={bodyComponents}
+                    >
+                      {previewBody}
+                    </ReactMarkdown>
+                  </div>
+                </EmailChromeFrame>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
+
 
     </div>
   );

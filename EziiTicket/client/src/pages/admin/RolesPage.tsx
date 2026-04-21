@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
 import { toast } from "sonner";
 import {
   createRole,
@@ -23,12 +24,6 @@ import { Pencil, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 import { createPortal } from "react-dom";
 
 type RolePermissions = {
-  ticket_access?: string;
-  assign_scope?: string;
-  can_assign?: boolean;
-  can_resolve?: boolean;
-  tier1_sla_config?: "none" | "view" | "edit";
-  tier2_sla_config?: "none" | "view" | "edit";
   screen_access?: Record<string, { view: boolean; modify: boolean }>;
 };
 
@@ -39,8 +34,29 @@ type DraftState = {
   apply_role_to: ApplyRoleTo;
   apply_attribute_id: string;
   apply_sub_attribute_id: string;
-  apply_worker_type_id: number | null;
+  apply_worker_type_id: string;
 };
+
+type RolesToggleSwitchProps = {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  ariaLabel: string;
+};
+
+function RolesToggleSwitch({ checked, onChange, ariaLabel }: RolesToggleSwitchProps) {
+  return (
+    <label className="roles-toggle-switch">
+      <input
+        type="checkbox"
+        className="roles-toggle-checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        aria-label={ariaLabel}
+      />
+      <div className="roles-toggle-slider" />
+    </label>
+  );
+}
 
 // Scaffold types for upcoming "Designation + Access Profile" mapping UI.
 export type UserAccessMappingDraft = {
@@ -83,9 +99,9 @@ const ROLE_ACCESS_SCREENS = [
   { key: "notification_templates", label: "Notification Templates" },
   { key: "canned_responses", label: "Canned Responses" },
   { key: "custom_fields", label: "Custom Fields" },
-  { key: "api_tokens", label: "API Tokens" },
-  { key: "webhooks", label: "Webhooks" },
-  { key: "audit_logs", label: "Audit Logs" },
+  // { key: "api_tokens", label: "API Tokens" },
+  // { key: "webhooks", label: "Webhooks" },
+  // { key: "audit_logs", label: "Audit Logs" },
 ] as const;
 
 const CUSTOMER_EXTRA_ROLE_ACCESS_SCREENS = [
@@ -207,92 +223,55 @@ function baselineRoleKey(name: string) {
 
 /** Merge stored screen_access with known screens. System Admin defaults are editable like other roles (no forced all-on). */
 function normalizePermissions(permissions: RolePermissions): RolePermissions {
+  const rest = { ...(permissions as RolePermissions & {
+    ticket_access?: string;
+    assign_scope?: string;
+    can_resolve?: boolean;
+    tier1_sla_config?: "none" | "view" | "edit";
+    tier2_sla_config?: "none" | "view" | "edit";
+  }) };
+  delete rest.ticket_access;
+  delete rest.assign_scope;
+  delete rest.can_resolve;
+  delete rest.tier1_sla_config;
+  delete rest.tier2_sla_config;
   return {
-    ...permissions,
-    screen_access: normalizeScreenAccess(permissions.screen_access, false),
+    ...rest,
+    screen_access: normalizeScreenAccess(rest.screen_access, false),
   };
 }
 
 function defaultPermissions(): RolePermissions {
   return {
-    ticket_access: "own_tickets",
-    assign_scope: "none",
-    can_assign: false,
-    can_resolve: false,
-    tier1_sla_config: "none",
-    tier2_sla_config: "none",
     screen_access: defaultScreenAccess(false),
   };
 }
 
 const DEFAULT_ROLE_BASELINES: Record<string, RolePermissions> = {
   customer: {
-    ticket_access: "own_tickets",
-    assign_scope: "none",
-    can_assign: false,
-    can_resolve: false,
-    tier1_sla_config: "none",
-    tier2_sla_config: "none",
     screen_access: defaultCustomerScreenAccessFull(),
   },
   "org admin": {
-    ticket_access: "org_tickets",
-    assign_scope: "none",
-    can_assign: false,
-    can_resolve: false,
-    tier1_sla_config: "none",
-    tier2_sla_config: "none",
     screen_access: defaultScreenAccessAllView(),
   },
-  "l1 agent": {
-    ticket_access: "assigned_queue",
-    assign_scope: "self",
-    can_assign: true,
-    can_resolve: true,
-    tier1_sla_config: "none",
-    tier2_sla_config: "none",
-    screen_access: defaultScreenAccessAllViewAgentTier(),
-  },
-  "l2 specialist": {
-    ticket_access: "product_queue_escalated",
-    assign_scope: "l2_queue",
-    can_assign: true,
-    can_resolve: true,
-    tier1_sla_config: "none",
-    tier2_sla_config: "none",
-    screen_access: defaultScreenAccessAllViewAgentTier(),
-  },
-  "l3 engineer": {
-    ticket_access: "all_tickets",
-    assign_scope: "any",
-    can_assign: true,
-    can_resolve: true,
-    tier1_sla_config: "none",
-    tier2_sla_config: "none",
+  agent: {
     screen_access: defaultScreenAccessAllViewAgentTier(),
   },
   "team lead": {
-    ticket_access: "all_tickets",
-    assign_scope: "any",
-    can_assign: true,
-    can_resolve: true,
-    tier1_sla_config: "view",
-    tier2_sla_config: "view",
     screen_access: defaultScreenAccessAllViewAgentTier(),
   },
   "system admin": {
-    ticket_access: "all_tickets",
-    assign_scope: "any",
-    can_assign: true,
-    can_resolve: true,
-    tier1_sla_config: "edit",
-    tier2_sla_config: "edit",
     screen_access: defaultScreenAccess(true),
   },
 };
 
 function normalizeRoleNameKey(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function isLegacyAgentLevelRole(name: string) {
+  const key = baselineRoleKey(name);
+  return key === "l1 agent" || key === "l2 specialist" || key === "l3 engineer";
 }
 
 function getBaselineForRole(name: string) {
@@ -355,8 +334,31 @@ function applyFieldsFromRole(role: Role | null): Pick<
     apply_role_to: (role?.apply_role_to as ApplyRoleTo) ?? "all",
     apply_attribute_id: role?.apply_attribute_id ?? "",
     apply_sub_attribute_id: role?.apply_sub_attribute_id ?? "",
-    apply_worker_type_id: role?.apply_worker_type_id ?? null,
+    apply_worker_type_id: role?.apply_worker_type_id ?? "",
   };
+}
+
+function parseCsvIds(value: string): string[] {
+  return value
+    .split(",")
+    .map((v) => v.trim())
+    .filter(Boolean);
+}
+
+function mergeCsvId(csv: string, nextId: string): string {
+  const current = parseCsvIds(csv);
+  if (!nextId || current.includes(nextId)) return csv;
+  return [...current, nextId].join(",");
+}
+
+function removeCsvId(csv: string, removeId: string): string {
+  return parseCsvIds(csv)
+    .filter((id) => id !== removeId)
+    .join(",");
+}
+
+function formatWorkerTypeLabel(id: string, workerTypes: Array<{ id: number; customer_worker_type: string }>) {
+  return workerTypes.find((w) => String(w.id) === id)?.customer_worker_type ?? id;
 }
 
 export function RolesPage() {
@@ -382,6 +384,7 @@ export function RolesPage() {
   const [roleModalOpen, setRoleModalOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [meScopedRoleName, setMeScopedRoleName] = useState<string | null>(null);
+  const [canModifyRolesScreen, setCanModifyRolesScreen] = useState(isSystemAdminUser);
   const [extAttributes, setExtAttributes] = useState<Array<{ attribute_id: string; attribute: string }>>([]);
   const [extSubAttributes, setExtSubAttributes] = useState<Array<{ attribute_sub_id: string; attribute_sub: string }>>(
     []
@@ -393,8 +396,9 @@ export function RolesPage() {
     [selectedRoleId, roles]
   );
 
-  const defaultRoles = useMemo(() => roles.filter((r) => r.is_default), [roles]);
-  const customRoles = useMemo(() => roles.filter((r) => !r.is_default), [roles]);
+  const visibleRoles = useMemo(() => roles.filter((r) => !isLegacyAgentLevelRole(r.name)), [roles]);
+  const defaultRoles = useMemo(() => visibleRoles.filter((r) => r.is_default), [visibleRoles]);
+  const customRoles = useMemo(() => visibleRoles.filter((r) => !r.is_default), [visibleRoles]);
   const filteredCustomRoles = useMemo(() => {
     if (!selectedOrgFilter) return customRoles;
     const selectedOrgId = Number(selectedOrgFilter);
@@ -414,8 +418,9 @@ export function RolesPage() {
           : undefined;
       const all = await listRoles(orgId);
       setRoles(all);
-      if (!selectedRoleId && all.length) {
-        setSelectedRoleId(all[0]!.id);
+      const visible = all.filter((role) => !isLegacyAgentLevelRole(role.name));
+      if ((!selectedRoleId || !visible.some((role) => role.id === selectedRoleId)) && visible.length) {
+        setSelectedRoleId(visible[0]!.id);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load roles");
@@ -466,17 +471,28 @@ export function RolesPage() {
   }, [roleModalOpen]);
 
   useEffect(() => {
-    if (!roleModalOpen || !draft || draft.apply_role_to !== "sub_attribute" || !draft.apply_attribute_id) {
+    if (!roleModalOpen || !draft || draft.apply_role_to !== "attribute" || !draft.apply_attribute_id) {
       setExtSubAttributes([]);
       return;
     }
     let cancelled = false;
-    void getExternalOrgAttributeSubAttributes(draft.apply_attribute_id)
-      .then((raw) => {
+    const attributeIds = parseCsvIds(draft.apply_attribute_id);
+    if (!attributeIds.length) {
+      setExtSubAttributes([]);
+      return;
+    }
+    void Promise.all(attributeIds.map((id) => getExternalOrgAttributeSubAttributes(id)))
+      .then((rawList) => {
         if (cancelled) return;
-        const list =
-          (raw as { sub_attributes?: { attribute_sub_id: string; attribute_sub: string }[] })?.sub_attributes ?? [];
-        setExtSubAttributes(list);
+        const byId = new Map<string, { attribute_sub_id: string; attribute_sub: string }>();
+        for (const raw of rawList) {
+          const list =
+            (raw as { sub_attributes?: { attribute_sub_id: string; attribute_sub: string }[] })?.sub_attributes ?? [];
+          for (const item of list) {
+            if (item.attribute_sub_id) byId.set(item.attribute_sub_id, item);
+          }
+        }
+        setExtSubAttributes(Array.from(byId.values()));
       })
       .catch(() => {
         if (!cancelled) setExtSubAttributes([]);
@@ -521,6 +537,25 @@ export function RolesPage() {
       cancelled = true;
     };
   }, [authUser]);
+
+  useEffect(() => {
+    if (isSystemAdminUser) {
+      setCanModifyRolesScreen(true);
+      return;
+    }
+    let cancelled = false;
+    void getAuthMePermissions()
+      .then((res) => {
+        if (cancelled) return;
+        setCanModifyRolesScreen(Boolean(res.permissions_json?.screen_access?.roles_permissions?.modify));
+      })
+      .catch(() => {
+        if (!cancelled) setCanModifyRolesScreen(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSystemAdminUser]);
 
   function startEdit(role: Role) {
     const current = permissionsSafe(role.permissions_json);
@@ -681,10 +716,6 @@ export function RolesPage() {
   const yourRoleKey = isSystemAdminUser
     ? baselineRoleKey("system_admin")
     : scopedRoleKey ?? ticketRoleKey ?? authUserRoleKey;
-  console.log("yourRoleKey", yourRoleKey);
-  console.log("ticketRoleKey", ticketRoleKey);
-  console.log("authUserRoleKey", authUserRoleKey);
-
   const allRows = useMemo(
     () => [...filteredCustomRoles, ...defaultRoles],
     [filteredCustomRoles, defaultRoles]
@@ -698,6 +729,7 @@ export function RolesPage() {
     if (hasOrgOne) return scoped;
     return [{ id: "1", organization_name: "Resolve Biz Services Pvt Ltd" }, ...scoped];
   }, [externalOrgs, isOrgScopedAdmin, authOrgIdNum, isSystemAdminUser]);
+  const modifyAccessMessage = "You don't have modify access";
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-4 pb-8">
@@ -712,7 +744,7 @@ export function RolesPage() {
         <div className="flex items-center justify-between">
           {!isOrgScopedAdmin ? (
             <div className="w-full max-w-[280px]">
-              <p className="text-sm text-slate-600 dark:text-muted-foreground">Select Organization</p>
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</p>
               <select
                 value={selectedOrgFilter}
                 onChange={(e) => setSelectedOrgFilter(e.target.value)}
@@ -730,15 +762,18 @@ export function RolesPage() {
             </div>
           ) : null}
         </div>
-        <button
-          type="button"
-          onClick={startCreate}
-          className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm"
-          style={{ backgroundColor: EZII_BRAND.primary }}
-        >
-          <Plus className="h-4 w-4" />
-          Create Role
-        </button>
+        <InstantTooltip disabled={!canModifyRolesScreen} message={modifyAccessMessage}>
+          <button
+            type="button"
+            onClick={startCreate}
+            disabled={!canModifyRolesScreen}
+            className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold text-white shadow-sm disabled:opacity-60"
+            style={{ backgroundColor: EZII_BRAND.primary }}
+          >
+            <Plus className="h-4 w-4" />
+            Create Role
+          </button>
+        </InstantTooltip>
       </div>
 
       <GlassCard className="overflow-hidden rounded-2xl border border-black/10 bg-white/90 p-0 dark:border-white/10 dark:bg-white/[0.04]">
@@ -769,9 +804,6 @@ export function RolesPage() {
                   const rp = permissionsSafe(role.permissions_json);
                   const counts = permissionCounts(rp);
                   const isYourRole = yourRoleKey != null && baselineRoleKey(role.name) === yourRoleKey;
-                  console.log("isYourRole", isYourRole);
-                  console.log("yourRoleKey", yourRoleKey);
-                  console.log("baselineRoleKey(role.name)", baselineRoleKey(role.name));
                   return (
                     <tr
                       key={role.id}
@@ -813,23 +845,29 @@ export function RolesPage() {
                       <td className="px-3 py-3 text-slate-600 dark:text-slate-300">{formatRoleCreatedDate(role)}</td>
                       <td className="px-3 py-3">
                         <div className="flex items-center gap-3">
-                          <button
-                            type="button"
-                            onClick={() => startEdit(role)}
-                            className="text-slate-600 hover:text-[#1E88E5] dark:text-slate-300 dark:hover:text-[#60A5FA]"
-                            aria-label={`Edit ${role.name}`}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </button>
-                          {!role.is_default ? (
+                          <InstantTooltip disabled={!canModifyRolesScreen} message={modifyAccessMessage}>
                             <button
                               type="button"
-                              onClick={() => void handleDelete(role)}
-                              className="text-red-500 hover:text-red-600"
-                              aria-label={`Delete ${role.name}`}
+                              onClick={() => startEdit(role)}
+                              disabled={!canModifyRolesScreen}
+                              className="text-slate-600 hover:text-[#1E88E5] disabled:opacity-60 dark:text-slate-300 dark:hover:text-[#60A5FA]"
+                              aria-label={`Edit ${role.name}`}
                             >
-                              <Trash2 className="h-4 w-4" />
+                              <Pencil className="h-4 w-4" />
                             </button>
+                          </InstantTooltip>
+                          {!role.is_default ? (
+                            <InstantTooltip disabled={!canModifyRolesScreen} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                onClick={() => void handleDelete(role)}
+                                disabled={!canModifyRolesScreen}
+                                className="text-red-500 hover:text-red-600 disabled:opacity-60"
+                                aria-label={`Delete ${role.name}`}
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </InstantTooltip>
                           ) : null}
                         </div>
                       </td>
@@ -861,22 +899,27 @@ export function RolesPage() {
                 </h2>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={resetChanges}
-                  className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-black/5 dark:text-slate-200 dark:hover:bg-white/10"
-                >
-                  Reset Changes
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void handleSave()}
-                  disabled={saving || !effectiveDraft}
-                  className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
-                  style={{ backgroundColor: EZII_BRAND.primary }}
-                >
-                  {saving ? "Saving..." : "Save Changes"}
-                </button>
+                <InstantTooltip disabled={!canModifyRolesScreen} message={modifyAccessMessage}>
+                  <button
+                    type="button"
+                    onClick={resetChanges}
+                    disabled={!canModifyRolesScreen}
+                    className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-black/5 disabled:opacity-60 dark:text-slate-200 dark:hover:bg-white/10"
+                  >
+                    Reset Changes
+                  </button>
+                </InstantTooltip>
+                <InstantTooltip disabled={!canModifyRolesScreen} message={modifyAccessMessage}>
+                  <button
+                    type="button"
+                    onClick={() => void handleSave()}
+                    disabled={!canModifyRolesScreen || saving || !effectiveDraft}
+                    className="rounded-lg px-4 py-2 text-xs font-semibold text-white disabled:opacity-60"
+                    style={{ backgroundColor: EZII_BRAND.primary }}
+                  >
+                    {saving ? "Saving..." : "Save Changes"}
+                  </button>
+                </InstantTooltip>
                 <button
                   type="button"
                   onClick={() => setRoleModalOpen(false)}
@@ -916,9 +959,10 @@ export function RolesPage() {
                   </div>
                   <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
                     Restricts which tickets this role&apos;s permissions apply to (server-enforced on list/get/update).
-                    Populate ticket <code className="text-[10px]">metadata_json</code> with{" "}
-                    <code className="text-[10px]">attribute_id</code> / <code className="text-[10px]">attribute_sub_id</code>{" "}
-                    or <code className="text-[10px]">reporting_manager_user_id</code> as needed.
+                    Modes: <code className="text-[10px]">all</code>, <code className="text-[10px]">reportees</code>,{" "}
+                    <code className="text-[10px]">attribute</code>, <code className="text-[10px]">customer_org</code>,{" "}
+                    <code className="text-[10px]">internal_support</code>. Reportees are resolved at runtime for the
+                    logged-in user. Attribute supports multiple attributes and sub-attributes.
                   </p>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                     <label className="grid gap-1">
@@ -931,13 +975,9 @@ export function RolesPage() {
                               ? {
                                   ...d,
                                   apply_role_to: e.target.value as ApplyRoleTo,
-                                  apply_attribute_id:
-                                    e.target.value === "attribute" || e.target.value === "sub_attribute"
-                                      ? d.apply_attribute_id
-                                      : "",
-                                  apply_sub_attribute_id: e.target.value === "sub_attribute" ? d.apply_sub_attribute_id : "",
-                                  apply_worker_type_id:
-                                    e.target.value === "reportees" ? d.apply_worker_type_id : null,
+                                  apply_attribute_id: e.target.value === "attribute" ? d.apply_attribute_id : "",
+                                  apply_sub_attribute_id: e.target.value === "attribute" ? d.apply_sub_attribute_id : "",
+                                  apply_worker_type_id: e.target.value === "attribute" ? d.apply_worker_type_id : "",
                                 }
                               : d
                           )
@@ -947,52 +987,87 @@ export function RolesPage() {
                         <option value="all">All</option>
                         <option value="reportees">Reportees</option>
                         <option value="attribute">Attribute</option>
-                        <option value="sub_attribute">Sub-attribute</option>
+                        <option value="customer_org">Customer Org</option>
+                        <option value="internal_support">Internal Support</option>
                       </select>
                     </label>
-                    {effectiveDraft.apply_role_to === "reportees" ? (
+                    {effectiveDraft.apply_role_to === "attribute" ? (
                       <label className="grid gap-1">
-                        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Worker type (optional)</span>
+                        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                          Worker type (optional)
+                        </span>
+                        <div className="rounded-lg border border-black/10 bg-white/75 p-2 text-xs dark:border-white/10 dark:bg-white/10">
+                          <div className="mb-2 flex flex-wrap gap-1.5">
+                            {parseCsvIds(effectiveDraft.apply_worker_type_id).length ? (
+                              parseCsvIds(effectiveDraft.apply_worker_type_id).map((id) => (
+                                <span
+                                  key={id}
+                                  className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                                >
+                                  {formatWorkerTypeLabel(id, extWorkerTypes)}
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setDraft((d) =>
+                                        d
+                                          ? { ...d, apply_worker_type_id: removeCsvId(d.apply_worker_type_id, id) }
+                                          : d
+                                      )
+                                    }
+                                    className="rounded px-1 text-[10px] leading-none hover:bg-emerald-200 dark:hover:bg-emerald-500/30"
+                                    aria-label={`Remove ${formatWorkerTypeLabel(id, extWorkerTypes)}`}
+                                  >
+                                    x
+                                  </button>
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-[11px] text-slate-500">All worker types</span>
+                            )}
+                          </div>
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              const selectedId = e.target.value;
+                              if (!selectedId) return;
+                              setDraft((d) =>
+                                d
+                                  ? { ...d, apply_worker_type_id: mergeCsvId(d.apply_worker_type_id, selectedId) }
+                                  : d
+                              );
+                            }}
+                            className="w-full rounded-lg border border-black/10 bg-white/75 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/10"
+                          >
+                            <option value="">Select worker type...</option>
+                            {extWorkerTypes
+                              .filter((w) => !parseCsvIds(effectiveDraft.apply_worker_type_id).includes(String(w.id)))
+                              .map((w) => (
+                                <option key={w.id} value={String(w.id)}>
+                                  {w.customer_worker_type}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
+                      </label>
+                    ) : null}
+                    {effectiveDraft.apply_role_to === "attribute" && (
+                      <label className="grid gap-1">
+                        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Attribute</span>
                         <select
-                          value={effectiveDraft.apply_worker_type_id ?? ""}
-                          onChange={(e) => {
-                            const v = e.target.value;
+                          value={parseCsvIds(effectiveDraft.apply_attribute_id)[0] ?? ""}
+                          onChange={(e) =>
                             setDraft((d) =>
                               d
                                 ? {
                                     ...d,
-                                    apply_worker_type_id: v === "" ? null : Number(v),
+                                    apply_attribute_id: e.target.value,
                                   }
-                                : d
-                            );
-                          }}
-                          className="rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
-                        >
-                          <option value="">Select…</option>
-                          {extWorkerTypes.map((w) => (
-                            <option key={w.id} value={w.id}>
-                              {w.customer_worker_type}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : null}
-                    {(effectiveDraft.apply_role_to === "attribute" ||
-                      effectiveDraft.apply_role_to === "sub_attribute") && (
-                      <label className="grid gap-1 md:col-span-2">
-                        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Attribute</span>
-                        <select
-                          value={effectiveDraft.apply_attribute_id}
-                          onChange={(e) =>
-                            setDraft((d) =>
-                              d
-                                ? { ...d, apply_attribute_id: e.target.value, apply_sub_attribute_id: "" }
                                 : d
                             )
                           }
                           className="rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
                         >
-                          <option value="">Select attribute…</option>
+                          <option value="">Select attribute...</option>
                           {extAttributes.map((a) => (
                             <option key={a.attribute_id} value={a.attribute_id}>
                               {a.attribute}
@@ -1001,168 +1076,86 @@ export function RolesPage() {
                         </select>
                       </label>
                     )}
-                    {effectiveDraft.apply_role_to === "sub_attribute" && effectiveDraft.apply_attribute_id ? (
-                      <label className="grid gap-1 md:col-span-2">
-                        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Sub-attribute</span>
-                        <select
-                          value={effectiveDraft.apply_sub_attribute_id}
-                          onChange={(e) =>
-                            setDraft((d) => (d ? { ...d, apply_sub_attribute_id: e.target.value } : d))
-                          }
-                          className="rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
-                        >
-                          <option value="">Select sub-attribute…</option>
-                          {extSubAttributes.map((s) => (
-                            <option key={s.attribute_sub_id} value={s.attribute_sub_id}>
-                              {s.attribute_sub}
-                            </option>
-                          ))}
-                        </select>
+                    {effectiveDraft.apply_role_to === "attribute" && effectiveDraft.apply_attribute_id ? (
+                      <label className="grid gap-1">
+                        <span className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                          Sub-attributes (multiple, optional)
+                        </span>
+                        <div className="rounded-lg border border-black/10 bg-white/75 p-2 text-xs dark:border-white/10 dark:bg-white/10">
+                          <div className="mb-2 flex flex-wrap gap-1.5">
+                            {parseCsvIds(effectiveDraft.apply_sub_attribute_id).length ? (
+                              parseCsvIds(effectiveDraft.apply_sub_attribute_id).map((id) => {
+                                const label = extSubAttributes.find((s) => s.attribute_sub_id === id)?.attribute_sub ?? id;
+                                return (
+                                  <span
+                                    key={id}
+                                    className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-medium text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                                  >
+                                    {label}
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setDraft((d) =>
+                                          d
+                                            ? { ...d, apply_sub_attribute_id: removeCsvId(d.apply_sub_attribute_id, id) }
+                                            : d
+                                        )
+                                      }
+                                      className="rounded px-1 text-[10px] leading-none hover:bg-violet-200 dark:hover:bg-violet-500/30"
+                                      aria-label={`Remove ${label}`}
+                                    >
+                                      x
+                                    </button>
+                                  </span>
+                                );
+                              })
+                            ) : (
+                              <span className="text-[11px] text-slate-500">No sub-attributes selected</span>
+                            )}
+                          </div>
+                          <select
+                            value=""
+                            onChange={(e) => {
+                              const selectedId = e.target.value;
+                              if (!selectedId) return;
+                              setDraft((d) =>
+                                d
+                                  ? {
+                                      ...d,
+                                      apply_sub_attribute_id: mergeCsvId(d.apply_sub_attribute_id, selectedId),
+                                    }
+                                  : d
+                              );
+                            }}
+                            className="w-full rounded-lg border border-black/10 bg-white/75 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/10"
+                          >
+                            <option value="">Select sub-attribute...</option>
+                            {extSubAttributes
+                              .filter((s) => !parseCsvIds(effectiveDraft.apply_sub_attribute_id).includes(s.attribute_sub_id))
+                              .map((s) => (
+                                <option key={s.attribute_sub_id} value={s.attribute_sub_id}>
+                                  {s.attribute_sub}
+                                </option>
+                              ))}
+                          </select>
+                        </div>
                       </label>
                     ) : null}
-                  </div>
-                </div>
-
-                <div className="rounded-xl border border-black/10 bg-white/45 p-4 dark:border-white/10 dark:bg-white/[0.04]">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs font-bold uppercase tracking-wide text-[#334155] dark:text-slate-200">
-                      Default Permission Matrix
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const baseline = getBaselineForRole(effectiveDraft.name);
-                        if (!baseline) return;
-                        setDraft((d) =>
-                          d ? { ...d, permissions: normalizePermissions(baseline) } : d
-                        );
-                      }}
-                      className="rounded-md px-3 py-1 text-xs font-semibold text-white"
-                      style={{ backgroundColor: EZII_BRAND.primary }}
-                    >
-                      Apply Baseline
-                    </button>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-                    <label className="grid gap-1">
-                      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Ticket Access</span>
-                      <select
-                        value={p.ticket_access ?? "own_tickets"}
-                        onChange={(e) =>
-                          setDraft((d) =>
-                            d
-                              ? { ...d, permissions: { ...d.permissions, ticket_access: e.target.value } }
-                              : d
-                          )
-                        }
-                        className="rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
-                      >
-                        <option value="own_tickets">Own tickets only</option>
-                        <option value="org_tickets">Own organization</option>
-                        <option value="assigned_queue">Assigned queue</option>
-                        <option value="product_queue_escalated">Product queue + escalated</option>
-                        <option value="all_tickets">All tickets</option>
-                      </select>
-                    </label>
-
-                    <label className="grid gap-1">
-                      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Can Assign?</span>
-                      <select
-                        value={p.assign_scope ?? "none"}
-                        onChange={(e) =>
-                          setDraft((d) =>
-                            d
-                              ? {
-                                  ...d,
-                                  permissions: {
-                                    ...d.permissions,
-                                    assign_scope: e.target.value,
-                                    can_assign: e.target.value !== "none",
-                                  },
-                                }
-                              : d
-                          )
-                        }
-                        className="rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
-                      >
-                        <option value="none">No</option>
-                        <option value="self">Self</option>
-                        <option value="l2_queue">L2 queue</option>
-                        <option value="any">Any</option>
-                      </select>
-                    </label>
-
-                    <label className="flex items-center gap-2 rounded-lg border border-black/10 bg-white/75 px-3 py-2 dark:border-white/10 dark:bg-white/10">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(p.can_resolve)}
-                        onChange={(e) =>
-                          setDraft((d) =>
-                            d ? { ...d, permissions: { ...d.permissions, can_resolve: e.target.checked } } : d
-                          )
-                        }
-                        className="h-5 w-5 accent-[#1E88E5]"
-                      />
-                      <span className="text-xs font-medium">Can Resolve?</span>
-                    </label>
-
-                    <div className="rounded-lg border border-black/10 bg-white/75 px-3 py-2 dark:border-white/10 dark:bg-white/10">
-                      <div className="text-xs text-slate-500">Resolve State</div>
-                      <div className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                        {p.can_resolve ? "Yes" : "No"}
-                      </div>
-                    </div>
-
-                    <label className="grid gap-1">
-                      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Tier 1 SLA Config</span>
-                      <select
-                        value={p.tier1_sla_config ?? "none"}
-                        onChange={(e) =>
-                          setDraft((d) =>
-                            d
-                              ? {
-                                  ...d,
-                                  permissions: {
-                                    ...d.permissions,
-                                    tier1_sla_config: e.target.value as RolePermissions["tier1_sla_config"],
-                                  },
-                                }
-                              : d
-                          )
-                        }
-                        className="rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
-                      >
-                        <option value="none">No access</option>
-                        <option value="view">View only</option>
-                        <option value="edit">Edit within permitted bounds</option>
-                      </select>
-                    </label>
-
-                    <label className="grid gap-1">
-                      <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Tier 2 SLA Config</span>
-                      <select
-                        value={p.tier2_sla_config ?? "none"}
-                        onChange={(e) =>
-                          setDraft((d) =>
-                            d
-                              ? {
-                                  ...d,
-                                  permissions: {
-                                    ...d.permissions,
-                                    tier2_sla_config: e.target.value as RolePermissions["tier2_sla_config"],
-                                  },
-                                }
-                              : d
-                          )
-                        }
-                        className="rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
-                      >
-                        <option value="none">No access</option>
-                        <option value="view">View only</option>
-                        <option value="edit">Edit (Ezii-only restricted panel)</option>
-                      </select>
-                    </label>
+                    {effectiveDraft.apply_role_to === "reportees" ? (
+                      <p className="text-[11px] text-slate-500 md:col-span-2">
+                        Reportees scope is evaluated at runtime for the logged-in user and is not pre-fetched here.
+                      </p>
+                    ) : null}
+                    {effectiveDraft.apply_role_to === "customer_org" ? (
+                      <p className="text-[11px] text-slate-500 md:col-span-2">
+                        Customer org scope applies to users/tickets outside org 1 (tenant org users only).
+                      </p>
+                    ) : null}
+                    {effectiveDraft.apply_role_to === "internal_support" ? (
+                      <p className="text-[11px] text-slate-500 md:col-span-2">
+                        Internal support scope applies to internal team agent users (org 1 support pool).
+                      </p>
+                    ) : null}
                   </div>
                 </div>
 
@@ -1174,10 +1167,66 @@ export function RolesPage() {
                     {ROLE_ACCESS_SCREEN_GROUPS.map((group) => (
                       <div key={group.key} className="rounded-xl border border-black/10 bg-white/60 p-3 dark:border-white/10 dark:bg-white/[0.05]">
                         <div className="mb-2">
-                          <div className="text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
-                            {group.title}
-                          </div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400">{group.subtitle}</div>
+                          {(() => {
+                            const allViewEnabled = group.screens.every((screen) => p.screen_access?.[screen.key]?.view);
+                            const allModifyEnabled = group.screens.every((screen) => p.screen_access?.[screen.key]?.modify);
+                            return (
+                              <div className="grid grid-cols-[minmax(0,1fr)_140px_140px] items-center gap-2 rounded-lg border border-black/10 bg-slate-50/90 px-3 py-2 dark:border-white/10 dark:bg-white/[0.08]">
+                                <div>
+                                  <div className="text-xs font-semibold uppercase tracking-wide text-slate-700 dark:text-slate-200">
+                                    {group.title}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 dark:text-slate-400">{group.subtitle}</div>
+                                </div>
+                                <div className="flex items-center justify-center gap-2">
+                                  <RolesToggleSwitch
+                                    checked={allViewEnabled}
+                                    ariaLabel={`Toggle all view for ${group.title}`}
+                                    onChange={(nextView) =>
+                                      setDraft((d) => {
+                                        if (!d) return d;
+                                        const currentAccess = normalizeScreenAccess(d.permissions.screen_access, false);
+                                        for (const screen of group.screens) {
+                                          currentAccess[screen.key] = {
+                                            view: nextView,
+                                            modify: nextView ? currentAccess[screen.key]?.modify ?? false : false,
+                                          };
+                                        }
+                                        return {
+                                          ...d,
+                                          permissions: { ...d.permissions, screen_access: currentAccess },
+                                        };
+                                      })
+                                    }
+                                  />
+                                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">All View</span>
+                                </div>
+                                <div className="flex items-center justify-center gap-2">
+                                  <RolesToggleSwitch
+                                    checked={allModifyEnabled}
+                                    ariaLabel={`Toggle all modify for ${group.title}`}
+                                    onChange={(nextModify) =>
+                                      setDraft((d) => {
+                                        if (!d) return d;
+                                        const currentAccess = normalizeScreenAccess(d.permissions.screen_access, false);
+                                        for (const screen of group.screens) {
+                                          currentAccess[screen.key] = {
+                                            view: nextModify ? true : currentAccess[screen.key]?.view ?? false,
+                                            modify: nextModify,
+                                          };
+                                        }
+                                        return {
+                                          ...d,
+                                          permissions: { ...d.permissions, screen_access: currentAccess },
+                                        };
+                                      })
+                                    }
+                                  />
+                                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">All Modify</span>
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </div>
                         <div className="space-y-2">
                           {group.screens.map((screen) => {
@@ -1185,20 +1234,19 @@ export function RolesPage() {
                             return (
                               <div
                                 key={`${group.key}:${screen.key}`}
-                                className="grid grid-cols-[minmax(0,1fr)_80px_80px] items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/10"
+                                className="grid grid-cols-[minmax(0,1fr)_140px_140px] items-center gap-2 rounded-lg border border-black/10 bg-white/70 px-3 py-2 dark:border-white/10 dark:bg-white/10"
                               >
                                 <div className="text-xs font-medium text-slate-700 dark:text-slate-200">
                                   {screen.label}
                                 </div>
-                                <label className="flex items-center justify-center gap-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                                  <input
-                                    type="checkbox"
+                                <div className="flex items-center justify-center gap-2">
+                                  <RolesToggleSwitch
                                     checked={entry.view}
-                                    onChange={(e) =>
+                                    ariaLabel={`Toggle view for ${screen.label}`}
+                                    onChange={(nextView) =>
                                       setDraft((d) => {
                                         if (!d) return d;
                                         const currentAccess = normalizeScreenAccess(d.permissions.screen_access, false);
-                                        const nextView = e.target.checked;
                                         currentAccess[screen.key] = {
                                           view: nextView,
                                           modify: nextView ? currentAccess[screen.key]?.modify ?? false : false,
@@ -1209,19 +1257,17 @@ export function RolesPage() {
                                         };
                                       })
                                     }
-                                    className="h-4 w-4 accent-[#1E88E5]"
                                   />
-                                  View
-                                </label>
-                                <label className="flex items-center justify-center gap-1 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                                  <input
-                                    type="checkbox"
+                                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">View</span>
+                                </div>
+                                <div className="flex items-center justify-center gap-2">
+                                  <RolesToggleSwitch
                                     checked={entry.modify}
-                                    onChange={(e) =>
+                                    ariaLabel={`Toggle modify for ${screen.label}`}
+                                    onChange={(nextModify) =>
                                       setDraft((d) => {
                                         if (!d) return d;
                                         const currentAccess = normalizeScreenAccess(d.permissions.screen_access, false);
-                                        const nextModify = e.target.checked;
                                         currentAccess[screen.key] = {
                                           view: nextModify ? true : currentAccess[screen.key]?.view ?? false,
                                           modify: nextModify,
@@ -1232,10 +1278,9 @@ export function RolesPage() {
                                         };
                                       })
                                     }
-                                    className="h-4 w-4 accent-[#1E88E5]"
                                   />
-                                  Modify
-                                </label>
+                                  <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">Modify</span>
+                                </div>
                               </div>
                             );
                           })}

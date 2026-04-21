@@ -23,8 +23,8 @@ export const SYSTEM_ADMIN_NAV_TO_SCREEN: Record<string, string | readonly string
   canned_responses: "canned_responses",
   custom_fields: "custom_fields",
   /** Combined admin page: require both integrations */
-  api_webhooks: ["api_tokens", "webhooks"],
-  audit_log: "audit_logs",
+  // api_webhooks: ["api_tokens", "webhooks"],
+  // audit_log: "audit_logs",
 };
 
 export type ScreenAccessMap = Record<string, { view: boolean; modify: boolean } | undefined>;

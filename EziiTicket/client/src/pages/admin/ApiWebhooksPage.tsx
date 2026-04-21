@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { GlassCard } from "@components/common/GlassCard";
+import { InstantTooltip } from "@components/common/InstantTooltip";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import { toast } from "sonner";
 import {
   createApiToken,
@@ -29,6 +31,8 @@ export function ApiWebhooksPage({ orgId }: { orgId: string }) {
     endpoint: "",
     events: [] as string[],
   });
+  const canModify = useScreenModifyAccess(["api_tokens", "webhooks"]);
+  const modifyAccessMessage = "You don't have modify access";
 
   useEffect(() => {
     const orgIdNum = Number(orgId);
@@ -103,13 +107,16 @@ export function ApiWebhooksPage({ orgId }: { orgId: string }) {
               placeholder="Token name"
               className="flex-1 rounded-xl border border-black/10 bg-white/5 px-3 py-2 text-sm dark:border-white/10"
             />
-            <button
-              type="button"
-              onClick={createToken}
-              className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-            >
-              Generate
-            </button>
+            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+              <button
+                type="button"
+                disabled={!canModify}
+                onClick={createToken}
+                className="rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+              >
+                Generate
+              </button>
+            </InstantTooltip>
           </div>
           <div className="mt-4 flex flex-col gap-2">
             {tokens.length === 0 ? <div className="text-sm text-muted-foreground">No tokens yet.</div> : null}
@@ -119,13 +126,16 @@ export function ApiWebhooksPage({ orgId }: { orgId: string }) {
                 <div className="text-xs text-muted-foreground">
                   {t.token_masked} · {t.created_at ? new Date(t.created_at).toLocaleString() : "—"} · {t.is_active ? "Active" : "Revoked"}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void updateApiToken(t.id, { is_active: !t.is_active }).then(reload)}
-                  className="mt-2 rounded-lg border border-black/10 px-2 py-1 text-xs dark:border-white/10"
-                >
-                  {t.is_active ? "Revoke" : "Enable"}
-                </button>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button
+                    type="button"
+                    disabled={!canModify}
+                    onClick={() => void updateApiToken(t.id, { is_active: !t.is_active }).then(reload)}
+                    className="mt-2 rounded-lg border border-black/10 px-2 py-1 text-xs disabled:opacity-60 dark:border-white/10"
+                  >
+                    {t.is_active ? "Revoke" : "Enable"}
+                  </button>
+                </InstantTooltip>
               </div>
             ))}
           </div>
@@ -168,13 +178,16 @@ export function ApiWebhooksPage({ orgId }: { orgId: string }) {
                 ))}
               </div>
             </div>
-            <button
-              type="button"
-              onClick={() => void createWebhookRow()}
-              className="w-fit rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
-            >
-              Save Webhook
-            </button>
+            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+              <button
+                type="button"
+                disabled={!canModify}
+                onClick={() => void createWebhookRow()}
+                className="w-fit rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-60"
+              >
+                Save Webhook
+              </button>
+            </InstantTooltip>
           </div>
           <div className="mt-4 flex flex-col gap-2">
             {hooks.length === 0 ? <div className="text-sm text-muted-foreground">No webhook endpoints yet.</div> : null}
@@ -193,13 +206,16 @@ export function ApiWebhooksPage({ orgId }: { orgId: string }) {
                   })()}{" "}
                   · {h.is_active ? "Active" : "Disabled"}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => void updateWebhook(h.id, { is_active: !h.is_active }).then(reload)}
-                  className="mt-2 rounded-lg border border-black/10 px-2 py-1 text-xs dark:border-white/10"
-                >
-                  {h.is_active ? "Disable" : "Enable"}
-                </button>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button
+                    type="button"
+                    disabled={!canModify}
+                    onClick={() => void updateWebhook(h.id, { is_active: !h.is_active }).then(reload)}
+                    className="mt-2 rounded-lg border border-black/10 px-2 py-1 text-xs disabled:opacity-60 dark:border-white/10"
+                  >
+                    {h.is_active ? "Disable" : "Enable"}
+                  </button>
+                </InstantTooltip>
               </div>
             ))}
           </div>

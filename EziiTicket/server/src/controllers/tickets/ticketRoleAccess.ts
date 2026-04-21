@@ -44,7 +44,7 @@ export function ticketMetadataObject(metadataJson: unknown): Record<string, unkn
  * Agent/lead access: own reporter/assignee always; otherwise enforce apply_role_to scope on metadata.
  */
 export function userCanAccessTicketForAgentRole(args: {
-  ticket: { reporter_user_id: unknown; assignee_user_id: unknown; metadata_json?: unknown };
+  ticket: { reporter_user_id: unknown; assignee_user_id: unknown; metadata_json?: unknown; organisation_id?: unknown };
   viewerUserId: number;
   apply: RoleApplyRow | null;
 }): boolean {
@@ -53,20 +53,35 @@ export function userCanAccessTicketForAgentRole(args: {
   if (ticket.assignee_user_id != null && Number(ticket.assignee_user_id) === viewerUserId) return true;
   if (!apply || (apply.apply_role_to ?? "all") === "all") return true;
   const meta = ticketMetadataObject(ticket.metadata_json);
-  return ticketMatchesRoleApplyScope(meta, apply, viewerUserId);
+  return ticketMatchesRoleApplyScope(
+    meta,
+    apply,
+    viewerUserId,
+    ticket.organisation_id == null ? null : Number(ticket.organisation_id)
+  );
 }
 
 /** Load ticket row fields needed for scope check (agent actions). */
 export async function fetchTicketScopeRow(
   ticketId: number,
   orgId: number
-): Promise<{ reporter_user_id: unknown; assignee_user_id: unknown; metadata_json: unknown } | null> {
+): Promise<{
+  reporter_user_id: unknown;
+  assignee_user_id: unknown;
+  metadata_json: unknown;
+  organisation_id: unknown;
+} | null> {
   const r = await pool.query(
-    `select reporter_user_id, assignee_user_id, metadata_json
+    `select reporter_user_id, assignee_user_id, metadata_json, organisation_id
      from tickets where id = $1 and organisation_id = $2`,
     [ticketId, orgId]
   );
-  return (r.rows[0] as { reporter_user_id: unknown; assignee_user_id: unknown; metadata_json: unknown }) ?? null;
+  return (r.rows[0] as {
+    reporter_user_id: unknown;
+    assignee_user_id: unknown;
+    metadata_json: unknown;
+    organisation_id: unknown;
+  }) ?? null;
 }
 
 export async function assertAgentCanAccessTicketOrThrow(

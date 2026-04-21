@@ -4,7 +4,6 @@ import {
   getOrganisation,
   getOrganisationProducts,
   listProducts,
-  provisionCustomerOrgUsersFromWorker,
   setOrganisationProduct,
   updateOrganisation,
   type ExternalOrganization,
@@ -45,9 +44,6 @@ export function OrgProductAssignModal({
 }: OrgProductAssignModalProps) {
   const [selectedValue, setSelectedValue] = useState("");
 
-  const [externalOrgs, setExternalOrgs] = useState<ExternalOrganization[]>([]);
-  const [externalOrgsLoading, setExternalOrgsLoading] = useState(false);
-
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -56,22 +52,37 @@ export function OrgProductAssignModal({
   const [orgProducts, setOrgProducts] = useState<OrganisationProduct[]>([]);
   const [draft, setDraft] = useState<Record<number, { enabled: boolean }>>({});
 
+  /** Customer orgs from external directory API (`getExternalOrganizations`). */
+  const [externalOrgList, setExternalOrgList] = useState<ExternalOrganization[]>(
+    []
+  );
+  const [orgsPickerLoading, setOrgsPickerLoading] = useState(false);
+  const [orgsPickerError, setOrgsPickerError] = useState<string | null>(null);
+
   const selectedOrgNum = useMemo(() => {
     if (!selectedValue) return null;
     return safeId(selectedValue);
   }, [selectedValue]);
 
-  const dropdownOrgs = useMemo(() => {
-    const list = [...externalOrgs];
-    if (initialOrgId && !list.some((o) => o.id === initialOrgId)) {
-      list.unshift({
-        id: initialOrgId,
-        organization_name:
-          initialOrgName?.trim() || `Organization ${initialOrgId}`,
-      });
+  const sortedExternalOrgs = useMemo(() => {
+    return [...externalOrgList].sort((a, b) =>
+      (a.organization_name ?? "").localeCompare(b.organization_name ?? "", undefined, {
+        sensitivity: "base",
+      })
+    );
+  }, [externalOrgList]);
+
+  const selectedOrgLabel = useMemo(() => {
+    if (initialOrgId) {
+      return initialOrgName?.trim() || `Organization ${initialOrgId}`;
     }
-    return list;
-  }, [initialOrgId, initialOrgName, externalOrgs]);
+    if (!selectedValue) return "";
+    const ext = externalOrgList.find((x) => String(x.id) === selectedValue);
+    const name = ext?.organization_name?.trim();
+    if (name) return name;
+    if (selectedOrgNum != null) return `Organization ${selectedOrgNum}`;
+    return "";
+  }, [initialOrgId, initialOrgName, selectedValue, selectedOrgNum, externalOrgList]);
 
   const resetWhenOpened = useCallback(() => {
     setSelectedValue(initialOrgId ?? "");
@@ -86,23 +97,29 @@ export function OrgProductAssignModal({
   }, [open, initialOrgId, resetWhenOpened]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || initialOrgId) return;
     let cancelled = false;
-    setExternalOrgsLoading(true);
-    void getExternalOrganizations()
-      .then((list) => {
-        if (!cancelled) setExternalOrgs(list);
-      })
-      .catch(() => {
-        if (!cancelled) setExternalOrgs([]);
-      })
-      .finally(() => {
-        if (!cancelled) setExternalOrgsLoading(false);
-      });
+    setOrgsPickerLoading(true);
+    setOrgsPickerError(null);
+    void (async () => {
+      try {
+        const ext = await getExternalOrganizations();
+        if (!cancelled) setExternalOrgList(ext);
+      } catch (e) {
+        if (!cancelled) {
+          setExternalOrgList([]);
+          setOrgsPickerError(
+            e instanceof Error ? e.message : "Failed to load external organizations"
+          );
+        }
+      } finally {
+        if (!cancelled) setOrgsPickerLoading(false);
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, initialOrgId]);
 
   const buildDraftFromProducts = useCallback(
     (prods: Product[], op: OrganisationProduct[]) => {
@@ -169,8 +186,7 @@ export function OrgProductAssignModal({
 
     setSaving(true);
     try {
-      const extMeta = externalOrgs.find((o) => o.id === selectedValue);
-      const nameFromDirectory = extMeta?.organization_name?.trim();
+      const nameFromDirectory = selectedOrgLabel.trim();
       if (nameFromDirectory) {
         try {
           const profile = await getOrganisation(selectedOrgNum);
@@ -192,17 +208,6 @@ export function OrgProductAssignModal({
         });
       }
       toast.success("Products saved.");
-      void provisionCustomerOrgUsersFromWorker(selectedOrgNum)
-        .then((r) => {
-          if (r.provisioned > 0) {
-            toast.message("Active directory users added", {
-              description: `${r.provisioned} user(s) synced with default Customer ticket role for this organization.`,
-            });
-          }
-        })
-        .catch(() => {
-          /* non–system-admin or worker-master unreachable */
-        });
       onSaved();
       onOpenChange(false);
     } catch (e) {
@@ -233,11 +238,21 @@ export function OrgProductAssignModal({
               id="org-product-modal-title"
               className="text-lg font-semibold text-[#475569] dark:text-foreground"
             >
-              Organization & products
+              Organization products
             </h2>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Pick a tenant from the directory and enable products. Creating a queue
-              with a product sets the default routing queue for that product automatically.
+              {initialOrgId ? (
+                <>
+                  Configure products for the selected organization. Creating a queue with a
+                  product sets the default routing queue for that product automatically.
+                </>
+              ) : (
+                <>
+                  Choose a customer organization from the external directory, then configure
+                  products. Creating a queue with a product sets the default routing queue for
+                  that product automatically.
+                </>
+              )}
             </p>
           </div>
           <button
@@ -251,30 +266,58 @@ export function OrgProductAssignModal({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 scrollbar-slim">
-          <label className="grid gap-1.5 text-sm">
-            <span className="font-medium text-foreground">Organization</span>
-            <select
-              value={selectedValue}
-              onChange={(e) => setSelectedValue(e.target.value)}
-              disabled={externalOrgsLoading}
-              className="rounded-xl border border-black/10 bg-white/70 px-3 py-2.5 text-sm backdrop-blur-sm disabled:opacity-60 dark:border-white/15 dark:bg-white/10"
-            >
-              <option value="">
-                {externalOrgsLoading
-                  ? "Loading organizations…"
-                  : "— Select organization —"}
-              </option>
-              {dropdownOrgs.map((o) => (
-                <option key={o.id} value={o.id}>
-                  {o.organization_name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {initialOrgId ? (
+            selectedValue ? (
+              <div className="rounded-xl border border-black/10 bg-white/40 px-4 py-3 text-sm backdrop-blur-sm dark:border-white/10 dark:bg-white/5">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Organization
+                </div>
+                <div className="mt-1 font-semibold text-foreground">
+                  {selectedOrgLabel}
+                </div>
+              </div>
+            ) : null
+          ) : (
+            <div className="space-y-2">
+              <label
+                htmlFor="org-product-assign-org-select"
+                className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                Organization
+              </label>
+              {orgsPickerLoading ? (
+                <div className="py-6">
+                  <Loader label="Loading directory organizations…" size="sm" />
+                </div>
+              ) : orgsPickerError ? (
+                <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-400">
+                  {orgsPickerError}
+                </div>
+              ) : sortedExternalOrgs.length === 0 ? (
+                <p className="rounded-xl border border-black/10 bg-white/40 px-3 py-2.5 text-sm text-muted-foreground dark:border-white/10 dark:bg-white/5">
+                  No customer organizations were returned from the external directory.
+                </p>
+              ) : (
+                <select
+                  id="org-product-assign-org-select"
+                  value={selectedValue}
+                  onChange={(e) => setSelectedValue(e.target.value)}
+                  className="w-full rounded-xl border border-black/10 bg-white/60 px-3 py-2.5 text-sm font-medium text-foreground backdrop-blur-sm dark:border-white/15 dark:bg-white/10"
+                >
+                  <option value="">Select an organization…</option>
+                  {sortedExternalOrgs.map((org) => (
+                    <option key={org.id} value={String(org.id)}>
+                      {org.organization_name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
 
           {!selectedValue ? (
             <p className="mt-6 text-center text-sm text-muted-foreground">
-              Choose an organization to configure products.
+              No organization selected.
             </p>
           ) : null}
 

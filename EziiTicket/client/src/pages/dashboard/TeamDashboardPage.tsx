@@ -43,8 +43,6 @@ type TeamDashboardPageProps = {
   orgId: string;
   /** Multiple nav keys use `/dashboard`; use this to pick the right layout (e.g. customer org vs my). */
   dashboardNavKey?: string;
-  refreshSeconds: number;
-  onRefreshSecondsChange?: (seconds: number) => void;
   /** Org admin dashboard: "View all" tickets navigation */
   onNavigateToTickets?: () => void;
   /** Customer dashboard: "Create new ticket" navigation */
@@ -184,13 +182,10 @@ function priorityBadge(p: TicketRow["priority"]) {
 
 type OrgAdminDashboardProps = {
   orgId: string;
-  refreshSeconds: number;
-  onRefreshSecondsChange?: (seconds: number) => void;
   onNavigateToTickets?: () => void;
 };
 
 type CustomerMyDashboardProps = {
-  refreshSeconds: number;
   onNavigateToTickets?: () => void;
   onNavigateToCreateTicket?: () => void;
 };
@@ -206,7 +201,6 @@ function customerStatusPill(status: string) {
 }
 
 function CustomerMyDashboard({
-  refreshSeconds,
   onNavigateToTickets,
   onNavigateToCreateTicket,
 }: CustomerMyDashboardProps) {
@@ -251,12 +245,10 @@ function CustomerMyDashboard({
       }
     };
     void load();
-    const interval = window.setInterval(() => void load(), Math.max(10, refreshSeconds) * 1000);
     return () => {
       stopped = true;
-      window.clearInterval(interval);
     };
-  }, [orgIdNum, refreshSeconds]);
+  }, [orgIdNum]);
 
   const activeTickets = useMemo(
     () => tickets.filter((t) => ["new", "open", "pending", "escalated", "reopened"].includes(String(t.status).toLowerCase())),
@@ -499,8 +491,6 @@ function CustomerMyDashboard({
 
 function OrgAdminDashboard({
   orgId,
-  refreshSeconds,
-  onRefreshSecondsChange,
   onNavigateToTickets,
 }: OrgAdminDashboardProps) {
   const authUser = useAuthStore((s) => s.user);
@@ -552,12 +542,10 @@ function OrgAdminDashboard({
     };
 
     void load();
-    const interval = window.setInterval(() => void load(), Math.max(10, refreshSeconds) * 1000);
     return () => {
       stopped = true;
-      window.clearInterval(interval);
     };
-  }, [orgIdNum, refreshSeconds]);
+  }, [orgIdNum]);
 
   const productNameById = useMemo(() => {
     const m = new Map<number, string>();
@@ -708,17 +696,6 @@ function OrgAdminDashboard({
                 Updating…
               </span>
             ) : null}
-            <GlassCard className="flex items-center gap-1.5 px-2.5 py-1.5">
-              <span className="text-xs text-muted-foreground">Refresh</span>
-              <select
-                value={String(refreshSeconds)}
-                onChange={(e) => onRefreshSecondsChange?.(Number(e.target.value))}
-                className="rounded-lg border border-border bg-background/90 px-2 py-1 text-xs text-foreground"
-              >
-                <option value="60">60s</option>
-                <option value="10">10s</option>
-              </select>
-            </GlassCard>
           </div>
         </div>
 
@@ -1008,8 +985,6 @@ export function TeamDashboardPage({
   viewMode,
   orgId,
   dashboardNavKey,
-  refreshSeconds,
-  onRefreshSecondsChange,
   onNavigateToTickets,
   onNavigateToCreateTicket,
 }: TeamDashboardPageProps) {
@@ -1019,7 +994,6 @@ export function TeamDashboardPage({
   }, [orgId]);
   const title = roleTitle(role, viewMode);
   const widgets = widgetsFor(role, viewMode);
-  const canUseRealtimeToggle = role === "team_lead" || role === "system_admin";
   const [queueLoad, setQueueLoad] = useState<DashboardTeamQueueLoad | null>(null);
   const [myAssigned, setMyAssigned] = useState<DashboardMyAssignedTickets | null>(null);
   const [mySlaRisk, setMySlaRisk] = useState<DashboardMySlaRisk | null>(null);
@@ -1054,15 +1028,11 @@ export function TeamDashboardPage({
     };
 
     void load();
-    const interval = window.setInterval(() => {
-      void load();
-    }, Math.max(10, refreshSeconds) * 1000);
 
     return () => {
       stopped = true;
-      window.clearInterval(interval);
     };
-  }, [orgIdNum, refreshSeconds, role, dashboardNavKey]);
+  }, [orgIdNum, role, dashboardNavKey]);
 
   const queueLoadSummary = useMemo(
     () => ({
@@ -1102,12 +1072,10 @@ export function TeamDashboardPage({
     };
 
     void load();
-    const interval = window.setInterval(() => void load(), Math.max(10, refreshSeconds) * 1000);
     return () => {
       stopped = true;
-      window.clearInterval(interval);
     };
-  }, [refreshSeconds, shouldRenderDefaultTeamLayout]);
+  }, [shouldRenderDefaultTeamLayout]);
 
   const myActiveTickets = useMemo(
     () => myTickets.filter((t) => ACTIVE_STATUSES.has(String(t.status).toLowerCase())),
@@ -1222,8 +1190,6 @@ export function TeamDashboardPage({
     return (
       <OrgAdminDashboard
         orgId={orgId}
-        refreshSeconds={refreshSeconds}
-        onRefreshSecondsChange={onRefreshSecondsChange}
         onNavigateToTickets={onNavigateToTickets}
       />
     );
@@ -1232,7 +1198,6 @@ export function TeamDashboardPage({
   if (role === "customer" && viewMode === "my_view") {
     return (
       <CustomerMyDashboard
-        refreshSeconds={refreshSeconds}
         onNavigateToTickets={onNavigateToTickets}
         onNavigateToCreateTicket={onNavigateToCreateTicket}
       />
@@ -1255,16 +1220,6 @@ export function TeamDashboardPage({
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 Syncing...
               </span>
-            ) : null}
-            {canUseRealtimeToggle ? (
-              <select
-                value={String(refreshSeconds)}
-                onChange={(e) => onRefreshSecondsChange?.(Number(e.target.value))}
-                className="rounded-lg border border-border bg-background/90 px-2 py-1 text-xs text-foreground"
-              >
-                <option value="60">60s</option>
-                <option value="10">10s (real-time)</option>
-              </select>
             ) : null}
           </div>
         </div>

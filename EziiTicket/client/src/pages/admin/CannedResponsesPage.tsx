@@ -1,121 +1,74 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import {
   createCannedResponse,
   deleteCannedResponse,
-  getExternalOrganizations,
   listCannedResponses,
   listProducts,
   updateCannedResponse,
   type CannedResponse,
-  type ExternalOrganization,
   type Product,
 } from "@api/adminApi";
 import { toast } from "sonner";
 import { Copy, Filter, Pencil, Plus, Trash2, X } from "lucide-react";
-import { useAuthStore } from "@store/useAuthStore";
+
+/** Platform-wide canned responses are stored under this org id in the database. */
+const CANNED_RESPONSES_PLATFORM_ORG_ID = 1;
 
 type UpdatedFilter = "all" | "30d" | "90d" | "365d";
 type UsageFilter = "all" | "high" | "medium" | "low";
 
 export function CannedResponsesPage({ orgId }: { orgId: string }) {
-  const authUser = useAuthStore((s) => s.user);
-  const isSystemAdmin =
-    authUser?.role_name === "admin" &&
-    authUser?.org_id === "1" &&
-    authUser?.user_id === "1" &&
-    authUser?.role_id === "1" &&
-    authUser?.user_type_id === "1";
+  void orgId;
 
   const [products, setProducts] = useState<Product[]>([]);
   const [rows, setRows] = useState<CannedResponse[]>([]);
-  const [externalOrgs, setExternalOrgs] = useState<ExternalOrganization[]>([]);
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState({
-    organisation_id: orgId,
     title: "",
     body: "",
     product_id: "",
     audience: "all" as CannedResponse["audience"],
   });
   const [filterState, setFilterState] = useState<{
-    orgIds: string[];
     productIds: number[];
     updated: UpdatedFilter;
     usage: UsageFilter;
   }>({
-    orgIds: [],
     productIds: [],
     updated: "all",
     usage: "all",
   });
-
-  const orgIdNum = useMemo(() => {
-    const n = Number(orgId);
-    return Number.isFinite(n) ? n : null;
-  }, [orgId]);
+  const canModify = useScreenModifyAccess("canned_responses");
+  const modifyAccessMessage = "You don't have modify access";
 
   useEffect(() => {
     void listProducts().then(setProducts).catch(() => setProducts([]));
   }, []);
 
-  async function reload() {
-    if (!orgIdNum) return;
+  const reload = useCallback(async () => {
     setLoading(true);
     try {
-      if (isSystemAdmin) {
-        const orgs = await getExternalOrganizations().catch(() => [] as ExternalOrganization[]);
-        setExternalOrgs(orgs);
-        const orgIds = Array.from(
-          new Set(
-            [1, ...orgs.map((o) => Number(o.id))]
-              .filter((id) => Number.isFinite(id))
-          )
-        );
-        const all = await Promise.all(
-          orgIds.map(async (id) => listCannedResponses(id).catch(() => [] as CannedResponse[]))
-        );
-        setRows(all.flat());
-      } else {
-        setExternalOrgs([]);
-        setRows(await listCannedResponses(orgIdNum));
-      }
+      setRows(await listCannedResponses());
+    } catch {
+      setRows([]);
+      toast.error("Failed to load canned responses.");
     } finally {
       setLoading(false);
     }
-  }
+  }, []);
 
   useEffect(() => {
     void reload();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [orgIdNum, isSystemAdmin]);
-
-  const orgNameById = useMemo(() => {
-    const m = new Map<number, string>();
-    m.set(1, "Ezii HQ");
-    for (const o of externalOrgs) {
-      const id = Number(o.id);
-      if (Number.isFinite(id)) m.set(id, o.organization_name);
-    }
-    return m;
-  }, [externalOrgs]);
-
-  const orgOptionsForCreate = useMemo(() => {
-    if (!isSystemAdmin) return [{ id: orgId, name: `Organization ${orgId}` }];
-    const byId = new Map<string, string>();
-    byId.set("1", "Ezii HQ");
-    for (const o of externalOrgs) {
-      if (!o.id) continue;
-      byId.set(String(o.id), o.organization_name || `Organization ${o.id}`);
-    }
-    return Array.from(byId.entries()).map(([id, name]) => ({ id, name }));
-  }, [isSystemAdmin, orgId, externalOrgs]);
+  }, [reload]);
 
   const categoryCounts = useMemo(() => {
     const byProduct = new Map<number, number>();
@@ -124,13 +77,6 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
     }
     return byProduct;
   }, [rows]);
-
-  const orgOptionsForFilter = useMemo(() => {
-    const fromRows = Array.from(new Set(rows.map((r) => Number(r.organisation_id))))
-      .filter((id) => Number.isFinite(id))
-      .map((id) => ({ id, name: orgNameById.get(id) ?? `Organization ${id}` }));
-    return fromRows.map((o) => ({ id: String(o.id), name: o.name }));
-  }, [rows, orgNameById]);
 
   function updatedWithin(created: string | undefined, updated: string | undefined, filter: UpdatedFilter) {
     if (filter === "all") return true;
@@ -152,21 +98,18 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
 
   const visibleRows = useMemo(() => {
     return rows.filter((r) => {
-      const byOrg =
-        filterState.orgIds.length === 0 || filterState.orgIds.includes(String(r.organisation_id));
       const byProduct =
         filterState.productIds.length === 0 ||
         (r.product_id != null && filterState.productIds.includes(Number(r.product_id)));
       const byUpdated = updatedWithin(r.created_at, r.updated_at, filterState.updated);
       const byUsage = filterState.usage === "all" || usageLevel(r) === filterState.usage;
-      return byOrg && byProduct && byUpdated && byUsage;
+      return byProduct && byUpdated && byUsage;
     });
   }, [rows, filterState]);
 
   function resetForm() {
     setEditingId(null);
     setForm({
-      organisation_id: form.organisation_id || orgId,
       title: "",
       body: "",
       product_id: "",
@@ -178,8 +121,6 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
     if (!form.title.trim()) return toast.error("Response title is required");
     if (!form.body.trim()) return toast.error("Response body is required");
     const productId = form.product_id ? Number(form.product_id) : null;
-    const createOrgId = Number(form.organisation_id || orgId);
-    if (!Number.isFinite(createOrgId)) return toast.error("Organization is required");
 
     setSaving(true);
     try {
@@ -193,7 +134,7 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
         toast.success("Response updated.");
       } else {
         await createCannedResponse({
-          organisation_id: createOrgId,
+          organisation_id: CANNED_RESPONSES_PLATFORM_ORG_ID,
           product_id: productId,
           title: form.title.trim(),
           body: form.body.trim(),
@@ -215,7 +156,6 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
   function onEdit(row: CannedResponse) {
     setEditingId(row.id);
     setForm({
-      organisation_id: String(row.organisation_id),
       title: row.title,
       body: row.body,
       product_id: row.product_id ? String(row.product_id) : "",
@@ -227,7 +167,7 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
   async function duplicateRow(row: CannedResponse) {
     try {
       await createCannedResponse({
-        organisation_id: Number(row.organisation_id),
+        organisation_id: CANNED_RESPONSES_PLATFORM_ORG_ID,
         product_id: row.product_id ?? null,
         title: `${row.title} (Copy)`,
         body: row.body,
@@ -240,11 +180,6 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
       toast.error(e instanceof Error ? e.message : "Failed to duplicate");
     }
   }
-
-  const totalUsesToday = useMemo(
-    () => visibleRows.reduce((sum, r) => sum + (((r.id * 73) % 600) + 40), 0),
-    [visibleRows]
-  );
 
   return (
     <div className="mx-auto max-w-[1300px] space-y-4 pb-8">
@@ -264,17 +199,20 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
             <Filter className="h-4 w-4" />
             Filter
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              resetForm();
-              setCreateOpen(true);
-            }}
-            className="inline-flex items-center gap-2 rounded-full bg-[#1E88E5] px-6 py-2.5 text-xs font-semibold text-white shadow-[0_8px_24px_rgba(30,136,229,0.35)]"
-          >
-            <Plus className="h-4 w-4" />
-            Create New Response
-          </button>
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify}
+              onClick={() => {
+                resetForm();
+                setCreateOpen(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-full bg-[#1E88E5] px-6 py-2.5 text-xs font-semibold text-white shadow-[0_8px_24px_rgba(30,136,229,0.35)] disabled:opacity-60"
+            >
+              <Plus className="h-4 w-4" />
+              Create New Response
+            </button>
+          </InstantTooltip>
         </div>
       </div>
 
@@ -298,14 +236,6 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
                     <span className="text-xs text-slate-500">{categoryCounts.get(p.id) ?? 0}</span>
                   </div>
                 ))}
-              </div>
-            </GlassCard>
-
-            <GlassCard className="overflow-hidden border-[#0A2A4D]/30 bg-gradient-to-br from-[#0A2A4D] to-[#0E3E70] p-0 shadow-[0_10px_24px_rgba(10,42,77,0.35)] dark:border-white/10">
-              <div className="p-4 text-white">
-                <div className="text-[10px] font-bold uppercase tracking-wide text-blue-100">Total Uses Today</div>
-                <div className="mt-1 text-5xl font-semibold text-white">{totalUsesToday.toLocaleString()}</div>
-                <div className="mt-2 text-xs font-semibold text-emerald-200">+12% from yesterday</div>
               </div>
             </GlassCard>
           </div>
@@ -348,15 +278,22 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
                         </td>
                         <td className="px-5 py-4">
                           <div className="flex items-center gap-2 text-slate-500 dark:text-slate-300">
-                            <button type="button" onClick={() => onEdit(r)} className="rounded-md p-1.5 hover:bg-black/5 dark:hover:bg-white/10"><Pencil className="h-4 w-4" /></button>
-                            <button type="button" onClick={() => void duplicateRow(r)} className="rounded-md p-1.5 hover:bg-black/5 dark:hover:bg-white/10"><Copy className="h-4 w-4" /></button>
-                            <button
-                              type="button"
-                              onClick={() => void deleteCannedResponse(r.id).then(reload)}
-                              className="rounded-md p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button type="button" disabled={!canModify} onClick={() => onEdit(r)} className="rounded-md p-1.5 hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"><Pencil className="h-4 w-4" /></button>
+                            </InstantTooltip>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button type="button" disabled={!canModify} onClick={() => void duplicateRow(r)} className="rounded-md p-1.5 hover:bg-black/5 disabled:opacity-60 dark:hover:bg-white/10"><Copy className="h-4 w-4" /></button>
+                            </InstantTooltip>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                disabled={!canModify}
+                                onClick={() => void deleteCannedResponse(r.id).then(reload)}
+                                className="rounded-md p-1.5 text-red-500 hover:bg-red-50 disabled:opacity-60 dark:hover:bg-red-500/10"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </button>
+                            </InstantTooltip>
                           </div>
                         </td>
                       </tr>
@@ -388,26 +325,6 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
                 <button type="button" onClick={() => setFilterOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
               <div className="space-y-4 p-5">
-                <label className="grid gap-1">
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">Organization</span>
-                  <select
-                    value={filterState.orgIds[0] ?? "all"}
-                    onChange={(e) =>
-                      setFilterState((f) => ({
-                        ...f,
-                        orgIds: e.target.value === "all" ? [] : [e.target.value],
-                      }))
-                    }
-                    className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10"
-                  >
-                    <option value="all">All Organizations</option>
-                    {orgOptionsForFilter.map((o) => (
-                      <option key={o.id} value={o.id}>
-                        {o.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
                 <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                   <label className="grid gap-1">
                     <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">Product Ecosystem</span>
@@ -471,7 +388,7 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
               <div className="flex items-center justify-between border-t border-black/10 bg-black/[0.02] px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <button
                   type="button"
-                  onClick={() => setFilterState({ orgIds: [], productIds: [], updated: "all", usage: "all" })}
+                  onClick={() => setFilterState({ productIds: [], updated: "all", usage: "all" })}
                   className="rounded-lg px-3 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300"
                 >
                   Clear All
@@ -495,28 +412,6 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
                 <button type="button" onClick={() => setCreateOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
               <div className="grid grid-cols-1 gap-3 p-6 md:grid-cols-2">
-                <label className="grid gap-1 md:col-span-2">
-                  <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">Select Organization</span>
-                  <select
-                    value={form.organisation_id}
-                    onChange={(e) => setForm((f) => ({ ...f, organisation_id: e.target.value }))}
-                    disabled={!isSystemAdmin}
-                    className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10 disabled:opacity-60"
-                  >
-                    {isSystemAdmin ? (
-                      <>
-                        <option value="">Select organization</option>
-                        {orgOptionsForCreate.map((o) => (
-                          <option key={o.id} value={o.id}>
-                            {o.name}
-                          </option>
-                        ))}
-                      </>
-                    ) : (
-                      <option value={orgId}>Organization {orgId}</option>
-                    )}
-                  </select>
-                </label>
                 <label className="grid gap-1 md:col-span-2">
                   <span className="text-[11px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">Product</span>
                   <select
@@ -569,7 +464,9 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
               </div>
               <div className="flex justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-6 py-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <button type="button" onClick={() => setCreateOpen(false)} className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300">Cancel</button>
-                <button type="button" onClick={() => void save()} disabled={saving} className="rounded-full bg-[#1E88E5] px-6 py-2 text-xs font-semibold text-white disabled:opacity-60">{saving ? "Saving..." : editingId ? "Update Response" : "Create Response"}</button>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button type="button" onClick={() => void save()} disabled={!canModify || saving} className="rounded-full bg-[#1E88E5] px-6 py-2 text-xs font-semibold text-white disabled:opacity-60">{saving ? "Saving..." : editingId ? "Update Response" : "Create Response"}</button>
+                </InstantTooltip>
               </div>
             </div>
           </div>,

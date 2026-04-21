@@ -1,4 +1,4 @@
-import { ACTION_KEYS, SCREEN_KEYS } from "../authz/permissionKeys.js";
+import { SCREEN_KEYS } from "../authz/permissionKeys.js";
 import { pool } from "../db/pool.js";
 
 type RoleRow = {
@@ -23,23 +23,15 @@ async function run() {
   for (const row of res.rows) {
     const doc = asObject(row.permissions_json);
     const screens = asObject(doc.screen_access);
-    const actions = asObject(doc.actions);
 
     const missingScreens = SCREEN_KEYS.filter((k) => !(k in screens));
-    const missingActions = ACTION_KEYS.filter((k) => !(k in actions));
 
     const badScreenShape = SCREEN_KEYS.filter((k) => {
       const entry = asObject(screens[k]);
       return typeof entry.view !== "boolean" || typeof entry.modify !== "boolean";
     });
-    const nonBooleanActions = ACTION_KEYS.filter((k) => typeof actions[k] !== "boolean");
 
-    if (
-      missingScreens.length === 0 &&
-      missingActions.length === 0 &&
-      badScreenShape.length === 0 &&
-      nonBooleanActions.length === 0
-    ) {
+    if (missingScreens.length === 0 && badScreenShape.length === 0) {
       continue;
     }
 
@@ -49,8 +41,6 @@ async function run() {
     );
     if (missingScreens.length > 0) console.error(`  missing screens: ${missingScreens.join(", ")}`);
     if (badScreenShape.length > 0) console.error(`  malformed screens: ${badScreenShape.join(", ")}`);
-    if (missingActions.length > 0) console.error(`  missing actions: ${missingActions.join(", ")}`);
-    if (nonBooleanActions.length > 0) console.error(`  malformed actions: ${nonBooleanActions.join(", ")}`);
   }
 
   if (invalid > 0) {

@@ -30,8 +30,6 @@ const THIRTY_D_MS = 30 * 24 * 60 * 60 * 1000;
 
 type Props = {
   orgId: string;
-  refreshSeconds: number;
-  onRefreshSecondsChange?: (seconds: number) => void;
   onNavigateToOrganizations?: () => void;
 };
 
@@ -223,8 +221,6 @@ function SlaDonut({
 
 export function SystemOverviewDashboardPage({
   orgId,
-  refreshSeconds,
-  onRefreshSecondsChange,
   onNavigateToOrganizations,
 }: Props) {
   void orgId;
@@ -310,12 +306,10 @@ export function SystemOverviewDashboardPage({
     };
 
     void load();
-    const interval = window.setInterval(() => void load(), Math.max(10, refreshSeconds) * 1000);
     return () => {
       stopped = true;
-      window.clearInterval(interval);
     };
-  }, [refreshSeconds]);
+  }, []);
 
   const { pairs: barPairs, labelA, labelB } = useMemo(
     () => buildVolumeBarPairs(volumeRows),
@@ -381,17 +375,6 @@ export function SystemOverviewDashboardPage({
               Updating…
             </span>
           ) : null}
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground">Refresh</span>
-            <select
-              value={String(refreshSeconds)}
-              onChange={(e) => onRefreshSecondsChange?.(Number(e.target.value))}
-              className="rounded-lg border border-black/10 bg-white/80 px-2 py-1.5 text-xs dark:border-white/10 dark:bg-white/10"
-            >
-              <option value="60">60s</option>
-              <option value="10">10s</option>
-            </select>
-          </div>
         </div>
       </div>
 

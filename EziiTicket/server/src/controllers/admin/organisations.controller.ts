@@ -7,7 +7,8 @@ import { ensureTenantAndDefaultsByOrgId } from "../../services/provisioning/ensu
 
 export async function listOrganisations(_req: Request, res: Response) {
   const result = await pool.query(
-    "select id, name, support_email, timezone, logo_url, portal_subdomain, created_at, updated_at from organisations order by id desc"
+    `select id, name, support_email, timezone, logo_url, portal_subdomain, is_ngo, created_at, updated_at
+     from organisations order by id desc`
   );
   return res.json({ ok: true, data: result.rows });
 }
@@ -23,7 +24,7 @@ export async function createOrganisation(req: Request, res: Response) {
   const result = await pool.query(
     `insert into organisations (name, support_email, timezone, logo_url, portal_subdomain)
      values ($1,$2,coalesce($3,'Asia/Kolkata'),$4,$5)
-     returning id, name, support_email, timezone, logo_url, portal_subdomain, created_at, updated_at`,
+     returning id, name, support_email, timezone, logo_url, portal_subdomain, is_ngo, created_at, updated_at`,
     [name, support_email ?? null, timezone ?? null, logo_url ?? null, portal_subdomain ?? null]
   );
 
@@ -57,7 +58,8 @@ export async function getOrganisationById(req: Request, res: Response) {
   if (!id) return res.status(400).json({ ok: false, error: "invalid id" });
 
   const result = await pool.query(
-    "select id, name, support_email, timezone, logo_url, portal_subdomain, created_at, updated_at from organisations where id=$1",
+    `select id, name, support_email, timezone, logo_url, portal_subdomain, is_ngo, created_at, updated_at
+     from organisations where id=$1`,
     [id]
   );
 
@@ -82,7 +84,7 @@ export async function updateOrganisationById(req: Request, res: Response) {
          portal_subdomain = coalesce($6, portal_subdomain),
          updated_at = now()
      where id=$1
-     returning id, name, support_email, timezone, logo_url, portal_subdomain, created_at, updated_at`,
+     returning id, name, support_email, timezone, logo_url, portal_subdomain, is_ngo, created_at, updated_at`,
     [id, name ?? null, support_email ?? null, timezone ?? null, logo_url ?? null, portal_subdomain ?? null]
   );
 

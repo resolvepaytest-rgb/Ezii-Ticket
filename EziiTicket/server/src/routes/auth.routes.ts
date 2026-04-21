@@ -3,6 +3,7 @@ import { requireAuth } from "../middleware/auth.middleware.js";
 import { decodeOrVerifyJwt } from "../auth/jwt.js";
 import { ensureTenantAndDefaultsByOrgId } from "../services/provisioning/ensureTenantAndDefaults.js";
 import { getAuthMePermissions } from "../controllers/auth/mePermissions.controller.js";
+import { sendAuthMeWithIsNgo } from "../controllers/auth/authMe.controller.js";
 
 export function registerAuthRoutes(router: Router) {
   router.get("/auth/login/:token", (req, res) => {
@@ -20,15 +21,26 @@ export function registerAuthRoutes(router: Router) {
       });
   });
 
-  // Validate current token / get claims
-  router.get("/auth/me", requireAuth, (req, res) => {
-    // Provision tenant + defaults for the decoded token's organisation.
-    Promise.resolve()
-      .then(() => ensureTenantAndDefaultsByOrgId(req.user?.org_id))
-      .catch(() => null)
-      .finally(() => {
-        res.json({ ok: true, user: req.user });
-      });
+  router.get("/auth/me", requireAuth, async (req, res, next) => {
+    try {
+      await Promise.resolve(ensureTenantAndDefaultsByOrgId(req.user?.org_id)).catch(() => null);
+      await sendAuthMeWithIsNgo(req, res);
+    } catch (e) {
+      next(e);
+    }
+  });
+
+  /**
+   * System admin: GET `/reports/get-client-products` (no token) → all orgs.
+   * Others: GET `/organization/get-client-products` (Bearer) → JWT org only.
+   */
+  router.post("/auth/sync-client-products", requireAuth, async (req, res, next) => {
+    try {
+      const mod = await import("../controllers/admin/clientProductsSync.controller.js");
+      await mod.syncClientProducts(req, res);
+    } catch (e) {
+      next(e);
+    }
   });
 
   router.get("/auth/me/permissions", requireAuth, (req, res, next) => {
@@ -39,4 +51,3 @@ export function registerAuthRoutes(router: Router) {
       .catch(next);
   });
 }
-

@@ -46,5 +46,20 @@ export const env = {
    * - 1: deny when action key is missing from `permissions_json.actions` (except system_admin).
    */
   permissionStrictActions: (process.env.PERMISSION_STRICT_ACTIONS ?? "0") === "1",
+
+  /**
+   * Leave / attendance platform (no trailing slash). When set with `ATTENDANCE_OOO_SYNC_ENABLED`,
+   * the server calls `GET {LEAVE_BASE_URL}/api/attendance-sync?orgId=…&startDate=…&endDate=…` daily at local midnight.
+   */
+  leaveBaseUrl: (process.env.LEAVE_BASE_URL ?? "").trim() || null,
+  /** Optional Bearer token for attendance-sync requests. */
+  leaveApiBearer: (process.env.LEAVE_API_BEARER ?? "").trim() || null,
+  /** When 0, midnight attendance → OOO sync is not scheduled. */
+  attendanceOooSyncEnabled: (process.env.ATTENDANCE_OOO_SYNC_ENABLED ?? "1") !== "0",
+  /** Organisation id passed as `orgId` and used to scope `users.organisation_id` updates (default 1). */
+  attendanceOooSyncOrgId: (() => {
+    const n = Number(process.env.ATTENDANCE_OOO_SYNC_ORG_ID ?? 1);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  })(),
 } as const;
 

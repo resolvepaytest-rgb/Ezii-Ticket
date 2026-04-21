@@ -3,13 +3,16 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
+import { SwitchToggle } from "@components/common/SwitchToggle";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import {
   createNotificationTemplate,
   listNotificationTemplates,
   updateNotificationTemplate,
   type NotificationTemplate,
 } from "@api/adminApi";
-import { Bell, Mail, Plus, RefreshCcw, X } from "lucide-react";
+import { Bell, ChevronDown, ChevronUp, Mail, Plus, RefreshCcw, X } from "lucide-react";
 import { EmailBodyRichToolbar } from "./NotificationEmailBodyToolbar";
 import { getDefaultNotificationTemplate } from "./notificationTemplateDefaults";
 import { NotificationTemplatePreview } from "./NotificationTemplatePreview";
@@ -61,9 +64,10 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [rows, setRows] = useState<NotificationTemplate[]>([]);
   const [selectedTrigger, setSelectedTrigger] = useState<string>("ticket_created");
-  const [tab, setTab] = useState<"editor" | "preview">("editor");
   const [saving, setSaving] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [triggersOpen, setTriggersOpen] = useState(false);
+  const [variablesOpen, setVariablesOpen] = useState(false);
   const [draft, setDraft] = useState({
     template_name: "",
     subject: "",
@@ -79,11 +83,12 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
     body: "",
     enable: true,
   });
-  const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const [createAttachedFiles, setCreateAttachedFiles] = useState<string[]>([]);
-  const editorRef = useRef<HTMLTextAreaElement | null>(null);
+  const canModify = useScreenModifyAccess("notification_templates");
+  const modifyAccessMessage = "You don't have modify access";
+  const triggersDropdownRef = useRef<HTMLDivElement | null>(null);
+  const variablesDropdownRef = useRef<HTMLDivElement | null>(null);
   const createEditorRef = useRef<HTMLTextAreaElement | null>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const createFileInputRef = useRef<HTMLInputElement | null>(null);
 
   async function load() {
@@ -103,6 +108,21 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgIdNum]);
+
+  useEffect(() => {
+    function handleOutsideClick(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (triggersDropdownRef.current && !triggersDropdownRef.current.contains(target)) {
+        setTriggersOpen(false);
+      }
+      if (variablesDropdownRef.current && !variablesDropdownRef.current.contains(target)) {
+        setVariablesOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
 
   const templatesByTrigger = useMemo(() => {
     const map = new Map<string, NotificationTemplate[]>();
@@ -124,7 +144,6 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
     const nameFromApi = base?.template_name?.trim() ?? "";
     const subjectFromApi = selectedEmail?.subject?.trim() ?? "";
     const bodyFromApi = base?.body?.trim() ?? "";
-    setAttachedFiles([]);
     setDraft({
       template_name: nameFromApi || defaults.template_name,
       subject: subjectFromApi || defaults.subject,
@@ -143,28 +162,7 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
       subject: defaults.subject,
       body: defaults.body,
     }));
-    setAttachedFiles([]);
     toast.message("Editor reset", { description: "Restored default copy for this event. Save to persist." });
-  }
-
-  function insertPlaceholder(token: string) {
-    setDraft((d) => ({ ...d, body: `${d.body}${d.body ? "\n" : ""}${token}` }));
-  }
-
-  function onPickAttachment() {
-    fileInputRef.current?.click();
-  }
-
-  function onFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0) return;
-    const names = files.map((f) => f.name);
-    setAttachedFiles((prev) => Array.from(new Set([...prev, ...names])));
-    setDraft((d) => ({
-      ...d,
-      body: `${d.body}${d.body ? "\n" : ""}${names.map((n) => `[Attachment: ${n}]`).join("\n")}`,
-    }));
-    e.target.value = "";
   }
 
   function onPickCreateAttachment() {
@@ -271,30 +269,94 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
             Configure automated responses and delivery preferences across all system triggers.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button type="button" className="inline-flex items-center gap-2 rounded-2xl border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold dark:border-white/15 dark:bg-white/10">
-            <RefreshCcw className="h-4 w-4" />
-            Version History
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              const d = getDefaultNotificationTemplate("ticket_created");
-              setCreateDraft({
-                template_name: d.template_name,
-                trigger_event: "ticket_created",
-                subject: d.subject,
-                body: d.body,
-                enable: true,
-              });
-              setCreateAttachedFiles([]);
-              setCreateOpen(true);
-            }}
-            className="inline-flex items-center gap-2 rounded-2xl bg-[#1E88E5] px-5 py-2 text-xs font-semibold text-white"
-          >
-            <Plus className="h-4 w-4" />
-            Create New Template
-          </button>
+        <div className="relative flex items-center gap-2">
+          <div ref={triggersDropdownRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setTriggersOpen((v) => !v);
+                setVariablesOpen(false);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-2xl border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200"
+            >
+              System Triggers
+              {triggersOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+            {triggersOpen ? (
+              <div className="absolute right-0 z-20 mt-2 w-[320px] rounded-xl border border-black/10 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-[#0f172a]">
+                <div className="max-h-72 space-y-1 overflow-y-auto">
+                  {TRIGGERS.map((t) => {
+                    const active = selectedTrigger === t.key;
+                    return (
+                      <button
+                        key={t.key}
+                        type="button"
+                        onClick={() => {
+                          setSelectedTrigger(t.key);
+                          setTriggersOpen(false);
+                        }}
+                        className={`w-full rounded-lg px-2.5 py-2 text-left ${
+                          active ? "bg-[#1E88E5]/10 text-[#1E88E5]" : "hover:bg-black/[0.04] dark:hover:bg-white/[0.08]"
+                        }`}
+                      >
+                        <div className="text-xs font-semibold">{t.label}</div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-300">{t.description}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div ref={variablesDropdownRef} className="relative">
+            <button
+              type="button"
+              onClick={() => {
+                setVariablesOpen((v) => !v);
+                setTriggersOpen(false);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-2xl border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200"
+            >
+              Dynamic Variables
+              {variablesOpen ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+            {variablesOpen ? (
+              <div className="absolute right-0 z-20 mt-2 w-[320px] rounded-xl border border-black/10 bg-white p-2 shadow-xl dark:border-white/10 dark:bg-[#0f172a]">
+                <div className="max-h-72 space-y-1 overflow-y-auto">
+                  {PLACEHOLDERS.map((p) => (
+                    <div key={p.token} className="rounded-lg bg-slate-50 px-2.5 py-2 dark:bg-white/[0.06]">
+                      <div className="font-mono text-[11px] text-[#1E88E5]">{p.token}</div>
+                      <div className="text-[11px] text-slate-600 dark:text-slate-300">{p.label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify}
+              onClick={() => {
+                const d = getDefaultNotificationTemplate("ticket_created");
+                setCreateDraft({
+                  template_name: d.template_name,
+                  trigger_event: "ticket_created",
+                  subject: d.subject,
+                  body: d.body,
+                  enable: true,
+                });
+                setCreateAttachedFiles([]);
+                setCreateOpen(true);
+              }}
+              className="inline-flex items-center gap-2 rounded-2xl bg-[#1E88E5] px-5 py-2 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              <Plus className="h-4 w-4" />
+              Create New Template
+            </button>
+          </InstantTooltip>
         </div>
       </div>
 
@@ -307,69 +369,27 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
           <div className="text-xs text-red-600 dark:text-red-300">{error}</div>
         </GlassCard>
       ) : (
-        <div className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="min-w-0 space-y-4">
-            <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="text-base font-semibold text-[#111827] dark:text-slate-100">System Triggers</div>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 dark:bg-white/10 dark:text-slate-300">
-                  {TRIGGERS.length} active
-                </span>
-              </div>
-              <div className="space-y-1.5">
-                {TRIGGERS.map((t) => {
-                  const active = selectedTrigger === t.key;
-                  return (
-                    <button
-                      key={t.key}
-                      type="button"
-                      onClick={() => setSelectedTrigger(t.key)}
-                      className={`w-full rounded-xl border px-3 py-2 text-left ${
-                        active
-                          ? "border-[#1E88E5]/50 bg-[#1E88E5]/8"
-                          : "border-transparent hover:bg-black/[0.03] dark:hover:bg-white/[0.06]"
-                      }`}
-                    >
-                      <div className="text-xs font-semibold text-[#114d87] dark:text-blue-300">{t.label}</div>
-                      <div className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-300">{t.description}</div>
-                    </button>
-                  );
-                })}
-              </div>
-            </GlassCard>
-
-            <GlassCard className="border-black/10 bg-gradient-to-b from-[#0F5EA8] to-[#0B4F92] p-4 text-white shadow-[0_10px_24px_rgba(15,94,168,0.35)] dark:border-white/10">
-              <div className="mb-2 text-sm font-semibold tracking-wide">Dynamic Variables</div>
-              <div className="space-y-1.5">
-                {PLACEHOLDERS.map((p) => (
-                  <div key={p.token} className="flex items-center justify-between rounded-lg bg-white/12 px-2.5 py-1.5 text-xs">
-                    <code className="rounded bg-white/15 px-1.5 py-0.5 text-[11px] text-white">{p.token}</code>
-                    <span className="text-[11px] font-medium text-blue-100">{p.label}</span>
-                  </div>
-                ))}
-              </div>
-            </GlassCard>
-          </div>
-
+        <div className="grid min-w-0 grid-cols-1 gap-4">
           <GlassCard className="min-w-0 overflow-hidden border-black/10 bg-white/75 p-0 dark:border-white/10 dark:bg-white/[0.05]">
-            <div className="border-b border-black/10 px-5 pt-3 dark:border-white/10">
-              <div className="flex items-center gap-4 text-xs font-semibold">
-                <button type="button" onClick={() => setTab("editor")} className={`border-b-2 pb-2 ${tab === "editor" ? "border-[#1E88E5] text-[#1E88E5]" : "border-transparent text-slate-500 dark:text-slate-300"}`}>Template Editor</button>
-                <button type="button" onClick={() => setTab("preview")} className={`border-b-2 pb-2 ${tab === "preview" ? "border-[#1E88E5] text-[#1E88E5]" : "border-transparent text-slate-500 dark:text-slate-300"}`}>Preview Mode</button>
-              </div>
-            </div>
-
             <div className="min-w-0 space-y-4 overflow-x-hidden p-5">
-              {tab === "editor" ? (
-                <>
                   <div className="flex flex-wrap items-center gap-4 rounded-xl border border-black/10 bg-white/70 px-4 py-3 dark:border-white/10 dark:bg-white/[0.04]">
                     <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#111827] dark:text-slate-100">
-                      <input type="checkbox" checked={draft.channel_email} onChange={(e) => setDraft((d) => ({ ...d, channel_email: e.target.checked }))} className="h-4 w-4 accent-[#1E88E5]" />
+                      <SwitchToggle
+                        className="scale-75 origin-left"
+                        ariaLabel="Email delivery toggle"
+                        checked={draft.channel_email}
+                        onChange={(checked) => setDraft((d) => ({ ...d, channel_email: checked }))}
+                      />
                       <Mail className="h-3.5 w-3.5 text-[#1E88E5]" />
                       EMAIL DELIVERY
                     </label>
                     <label className="inline-flex items-center gap-2 text-xs font-semibold text-[#111827] dark:text-slate-100">
-                      <input type="checkbox" checked={draft.channel_in_app} onChange={(e) => setDraft((d) => ({ ...d, channel_in_app: e.target.checked }))} className="h-4 w-4 accent-[#1E88E5]" />
+                      <SwitchToggle
+                        className="scale-75 origin-left"
+                        ariaLabel="In-app push toggle"
+                        checked={draft.channel_in_app}
+                        onChange={(checked) => setDraft((d) => ({ ...d, channel_in_app: checked }))}
+                      />
                       <Bell className="h-3.5 w-3.5 text-[#1E88E5]" />
                       IN-APP PUSH
                     </label>
@@ -387,44 +407,16 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
                     <input value={draft.subject} onChange={(e) => setDraft((d) => ({ ...d, subject: e.target.value }))} className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10" />
                   </label>
 
-                  <label className="grid gap-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-300">Email Body (Markdown Support)</span>
-                    <div className="overflow-hidden rounded-xl border border-black/10 bg-white/85 dark:border-white/15 dark:bg-white/10">
-                      <EmailBodyRichToolbar
-                        body={draft.body}
-                        setBody={(next) => setDraft((d) => ({ ...d, body: next }))}
-                        editorRef={editorRef}
-                        fileInputRef={fileInputRef}
-                        onPickAttachment={onPickAttachment}
-                        onFilesSelected={onFilesSelected}
-                        rightSlot={
-                          <button
-                            type="button"
-                            onClick={() => insertPlaceholder("{{ticket_id}}")}
-                            className="rounded-md border border-black/10 px-2 py-1 text-[10px] font-semibold dark:border-white/15"
-                          >
-                            INSERT {`{{}}`}
-                          </button>
-                        }
-                      />
-                      <textarea
-                        ref={editorRef}
-                        value={draft.body}
-                        onChange={(e) => setDraft((d) => ({ ...d, body: e.target.value }))}
-                        rows={10}
-                        className="min-h-[200px] w-full resize-y bg-transparent px-3 py-2 text-xs outline-none"
-                      />
-                    </div>
-                  </label>
-                  {attachedFiles.length > 0 ? (
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {attachedFiles.map((file) => (
-                        <span key={file} className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700 dark:bg-white/10 dark:text-slate-200">
-                          {file}
-                        </span>
-                      ))}
-                    </div>
-                  ) : null}
+                  <div className="grid gap-1">
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-300">Email Body Preview</span>
+                    <NotificationTemplatePreview
+                      subject={draft.subject}
+                      body={draft.body}
+                      onChangeSubject={(next: string) => setDraft((d) => ({ ...d, subject: next }))}
+                      onChangeBody={(next: string) => setDraft((d) => ({ ...d, body: next }))}
+                      insertOptions={PLACEHOLDERS}
+                    />
+                  </div>
 
                   <div className="flex items-center justify-between pt-1">
                     <button
@@ -437,17 +429,13 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
                     </button>
                     <div className="flex items-center gap-2">
                       <button type="button" className="rounded-xl border border-black/10 bg-white/80 px-4 py-2 text-xs font-semibold dark:border-white/15 dark:bg-white/10">Send Test Email</button>
-                      <button type="button" onClick={() => void saveCurrent()} disabled={saving} className="rounded-xl bg-[#1E88E5] px-5 py-2 text-xs font-semibold text-white disabled:opacity-60">
-                        {saving ? "Saving..." : "Save Template"}
-                      </button>
+                      <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                        <button type="button" onClick={() => void saveCurrent()} disabled={!canModify || saving} className="rounded-xl bg-[#1E88E5] px-5 py-2 text-xs font-semibold text-white disabled:opacity-60">
+                          {saving ? "Saving..." : "Save Template"}
+                        </button>
+                      </InstantTooltip>
                     </div>
                   </div>
-                </>
-              ) : null}
-
-              {tab === "preview" ? (
-                <NotificationTemplatePreview subject={draft.subject} body={draft.body} />
-              ) : null}
             </div>
           </GlassCard>
         </div>
@@ -550,9 +538,11 @@ export function NotificationTemplatesPage({ orgId }: { orgId: string }) {
               </div>
               <div className="flex items-center justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-6 py-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <button type="button" onClick={() => setCreateOpen(false)} className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300">Cancel</button>
-                <button type="button" onClick={() => void handleCreateModalSave()} disabled={saving} className="rounded-lg bg-[#1E88E5] px-5 py-2 text-xs font-semibold text-white disabled:opacity-60">
-                  {saving ? "Saving..." : "Save Template"}
-                </button>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button type="button" onClick={() => void handleCreateModalSave()} disabled={!canModify || saving} className="rounded-lg bg-[#1E88E5] px-5 py-2 text-xs font-semibold text-white disabled:opacity-60">
+                    {saving ? "Saving..." : "Save Template"}
+                  </button>
+                </InstantTooltip>
               </div>
             </div>
           </div>,

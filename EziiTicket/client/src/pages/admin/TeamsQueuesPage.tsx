@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
 import { toast } from "sonner";
 import { useAuthStore } from "@store/useAuthStore";
-import { ArrowLeft, BarChart3, CalendarDays, Pencil, Plus, ShieldCheck, Trash2, X } from "lucide-react";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
+import { ArrowLeft, CalendarDays, Pencil, Plus, ShieldCheck, Trash2, X } from "lucide-react";
 import { createPortal } from "react-dom";
 import {
   createQueue,
@@ -15,6 +17,7 @@ import {
   listUserScopeOrg,
   listProducts,
   listQueues,
+  getQueueOpenTicketCounts,
   listTeams,
   listTeamMembers,
   listUserRoles,
@@ -28,7 +31,46 @@ import {
   type User,
 } from "@api/adminApi";
 
-export function TeamsQueuesPage({ orgId }: { orgId: string }) {
+function organisationHasQueueForProduct(
+  queues: Queue[],
+  organisationId: number,
+  productId: number,
+  exceptQueueId?: number | string | null
+): boolean {
+  const exceptNum =
+    exceptQueueId == null || exceptQueueId === "" ? null : Number(exceptQueueId);
+  const skipId = exceptNum != null && Number.isFinite(exceptNum) ? exceptNum : null;
+
+  return queues.some((q) => {
+    if (
+      Number(q.organisation_id) !== organisationId ||
+      q.product_id == null ||
+      Number(q.product_id) !== productId
+    ) {
+      return false;
+    }
+    const qid = Number(q.id);
+    if (!Number.isFinite(qid)) return false;
+    if (skipId == null) return true;
+    return qid !== skipId;
+  });
+}
+
+/** Load score from tickets in open / pending / escalated: 0–30 stable, 31–80 medium, above 80 high. */
+function loadLevelFromScore(score: number): "stable" | "medium" | "high" {
+  if (score <= 30) return "stable";
+  if (score <= 80) return "medium";
+  return "high";
+}
+
+export function TeamsQueuesPage({
+  orgId,
+  onOrgChange,
+}: {
+  orgId: string;
+  /** When set (with system-admin user), shows org dropdown and updates app tenant context. */
+  onOrgChange?: (orgId: string) => void;
+}) {
   const ORG1_NAME = "Resolve Biz Services Pvt Ltd";
   const authUser = useAuthStore((s) => s.user);
   const orgIdNum = useMemo(() => {
@@ -41,6 +83,8 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
     authUser?.user_id === "1" &&
     authUser?.role_id === "1" &&
     authUser?.user_type_id === "1";
+  const canModify = useScreenModifyAccess("teams_queues");
+  const modifyAccessMessage = "You don't have modify access";
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -51,8 +95,8 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
   const [users, setUsers] = useState<User[]>([]);
   const [editorUsers, setEditorUsers] = useState<User[]>([]);
   const [externalOrgs, setExternalOrgs] = useState<ExternalOrganization[]>([]);
-  const [teamStatsById, setTeamStatsById] = useState<Record<number, { members: number; capacity: number }>>({});
-  const [orgScopedUserCountByOrgId, setOrgScopedUserCountByOrgId] = useState<Record<number, number>>({});
+  const [teamStatsById, setTeamStatsById] = useState<Record<number, { members: number; capacity: number | null }>>({});
+  const [waitingTicketsByQueueId, setWaitingTicketsByQueueId] = useState<Record<number, number>>({});
 
   const [refreshTick, setRefreshTick] = useState(0);
 
@@ -65,80 +109,36 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
       let t: Team[] = [];
       let q: Queue[] = [];
       let filteredUsers: User[] = [];
-      let activeSourceUserIds = new Set<number>();
 
       if (isSystemAdminUser) {
-        const [productsRes, extOrgsRes, usersRes, allTeamsRes, allQueuesRes, allScopeRes] = await Promise.all([
+        const [productsRes, extOrgsRes, usersRes, allTeamsRes, allQueuesRes] = await Promise.all([
           listProducts(),
           getExternalOrganizations().catch(() => [] as ExternalOrganization[]),
           listUsers(1),
           listTeams(),
           listQueues(),
-          listUserScopeOrg(),
         ]);
         p = productsRes;
         setExternalOrgs(extOrgsRes);
         filteredUsers = usersRes;
-        activeSourceUserIds = new Set(
-          usersRes
-            .filter((u) => (u.status ?? "").toLowerCase() === "active")
-            .map((u) => Number(u.user_id))
-        );
         t = allTeamsRes;
         q = allQueuesRes;
-
-        const scopedCounts: Record<number, number> = {};
-        const orgIdsFromData = new Set<number>();
-        allQueuesRes.forEach((row) => orgIdsFromData.add(Number(row.organisation_id)));
-        allTeamsRes.forEach((row) => orgIdsFromData.add(Number(row.organisation_id)));
-        orgIdsFromData.forEach((id) => {
-          if (id === 1) {
-            scopedCounts[id] = activeSourceUserIds.size;
-            return;
-          }
-          const uniqueScoped = new Set(
-            allScopeRes
-              .filter((s) => Number(s.scope_org_id) === id && s.is_active && activeSourceUserIds.has(Number(s.user_id)))
-              .map((s) => Number(s.user_id))
-          );
-          scopedCounts[id] = uniqueScoped.size;
-        });
-        setOrgScopedUserCountByOrgId(scopedCounts);
       } else {
         const usersSourceOrgId = orgIdNum;
-        const [productsRes, teamsRes, queuesRes, usersRes, eziiUsersRes, scopeRows] = await Promise.all([
+        const [productsRes, teamsRes, queuesRes, usersRes] = await Promise.all([
           listProducts(),
           listTeams(orgIdNum),
           listQueues(orgIdNum),
           listUsers(usersSourceOrgId),
-          listUsers(1),
-          listUserScopeOrg(orgIdNum).catch(() => []),
         ]);
         p = productsRes;
         t = teamsRes;
         q = queuesRes;
         filteredUsers = usersRes;
-        const activeEziiUserIds = new Set(
-          eziiUsersRes
-            .filter((u) => (u.status ?? "").toLowerCase() === "active")
-            .map((u) => Number(u.user_id))
-        );
-        activeSourceUserIds = new Set(
-          orgIdNum === 1
-            ? Array.from(activeEziiUserIds)
-            : Array.from(
-              new Set(
-                scopeRows
-                  .filter((s) => Number(s.scope_org_id) === orgIdNum && s.is_active && activeEziiUserIds.has(Number(s.user_id)))
-                  .map((s) => Number(s.user_id))
-              )
-            )
-        );
-        setOrgScopedUserCountByOrgId({ [orgIdNum]: activeSourceUserIds.size });
       }
 
       const memberRows = await Promise.allSettled(t.map((team) => listTeamMembers(team.id)));
-      const stats: Record<number, { members: number; capacity: number }> = {};
+      const stats: Record<number, { members: number; capacity: number | null }> = {};
       memberRows.forEach((res, idx) => {
         const teamId = t[idx]?.id;
         if (!teamId) return;
@@ -147,10 +147,19 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
           return;
         }
         const members = res.value ?? [];
-        const activeMembers = members.filter((m) => activeSourceUserIds.has(Number(m.user_id)));
+        let finiteCap = 0;
+        let hasUnlimited = false;
+        for (const m of members) {
+          if (m.max_open_tickets_cap == null) {
+            hasUnlimited = true;
+          } else {
+            const c = Number(m.max_open_tickets_cap);
+            if (Number.isFinite(c) && c > 0) finiteCap += c;
+          }
+        }
         stats[teamId] = {
-          members: activeMembers.length,
-          capacity: activeMembers.reduce((sum, m) => sum + (m.max_open_tickets_cap ?? 0), 0),
+          members: members.length,
+          capacity: hasUnlimited ? null : finiteCap,
         };
       });
       setProducts(p);
@@ -158,8 +167,20 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
       setQueues(q);
       setUsers(filteredUsers);
       setTeamStatsById(stats);
+
+      try {
+        const rows = await getQueueOpenTicketCounts(orgIdNum);
+        const next: Record<number, number> = {};
+        for (const row of rows) {
+          next[Number(row.queue_id)] = Number(row.waiting_count);
+        }
+        setWaitingTicketsByQueueId(next);
+      } catch {
+        setWaitingTicketsByQueueId({});
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load teams/queues");
+      setWaitingTicketsByQueueId({});
     } finally {
       setLoading(false);
     }
@@ -216,10 +237,13 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
   const [loadingCreateTeamUsers, setLoadingCreateTeamUsers] = useState(false);
   const [createTeamUserSearch, setCreateTeamUserSearch] = useState("");
   const [filterOpen, setFilterOpen] = useState(false);
-  const [queueFilter, setQueueFilter] = useState<{ orgId: string; productIds: string[] }>({
-    orgId: "all",
+  const [queueFilter, setQueueFilter] = useState<{ productIds: string[] }>({
     productIds: [],
   });
+
+  useEffect(() => {
+    setQueueFilter({ productIds: [] });
+  }, [orgId]);
 
   const createTeamOrgIdNum = useMemo(() => {
     if (createTeamForm.create_for_all_organisations) return null;
@@ -480,6 +504,14 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
     try {
       if (!createQueueForm.name.trim()) throw new Error("Queue name is required");
       if (!createQueueForm.product_id) throw new Error("Product is required");
+      const productNum = Number(createQueueForm.product_id);
+      if (
+        !createQueueForm.create_for_all_organisations &&
+        Number.isFinite(productNum) &&
+        organisationHasQueueForProduct(queues, createOrgId, productNum)
+      ) {
+        throw new Error("This organisation already has a queue for that product (maximum one per product).");
+      }
       await createQueue({
         organisation_id: createOrgId,
         product_id: Number(createQueueForm.product_id),
@@ -543,6 +575,16 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
     setUpdatingQueue(true);
     try {
       if (!editQueueForm.name.trim()) throw new Error("Queue name is required");
+      const editOrgNum = Number(editQueueForm.organisation_id);
+      const nextProductNum = editQueueForm.product_id ? Number(editQueueForm.product_id) : null;
+      if (
+        Number.isFinite(editOrgNum) &&
+        nextProductNum != null &&
+        Number.isFinite(nextProductNum) &&
+        organisationHasQueueForProduct(queues, editOrgNum, nextProductNum, editingQueueId)
+      ) {
+        throw new Error("This organisation already has a queue for that product (maximum one per product).");
+      }
       await updateQueue(editingQueueId, {
         name: editQueueForm.name.trim(),
         product_id: editQueueForm.product_id ? Number(editQueueForm.product_id) : null,
@@ -581,9 +623,7 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
 
   const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
 
-  const [memberDraft, setMemberDraft] = useState<
-    Record<number, { included: boolean; max_open_tickets_cap: number | null }>
-  >({});
+  const [memberDraft, setMemberDraft] = useState<Record<number, { max_open_tickets_cap: number | null }>>({});
 
   const [savingMembers, setSavingMembers] = useState(false);
   const [manageTeamUserSearch, setManageTeamUserSearch] = useState("");
@@ -596,29 +636,31 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
     let eligibleUsers: User[] = users;
     if (teamOrgId) eligibleUsers = await getEligibleUsersForOrg(teamOrgId);
     const members = await listTeamMembers(teamId);
-    const usersForEditor = [...eligibleUsers];
-    // Ensure existing team members are visible even if not present in eligible list payload.
-    members.forEach((m) => {
-      const exists = usersForEditor.some((u) => Number(u.user_id) === Number(m.user_id));
-      if (exists) return;
-      usersForEditor.push({
-        id: Number(m.user_id),
-        user_id: Number(m.user_id),
+    const byUid = new Map<number, User>();
+    for (const u of eligibleUsers) {
+      byUid.set(Number(u.user_id), u);
+    }
+    const rosterUsers: User[] = members.map((m) => {
+      const uid = Number(m.user_id);
+      const fromElig = byUid.get(uid);
+      if (fromElig) return fromElig;
+      return {
+        id: uid,
+        user_id: uid,
         organisation_id: teamOrgId ?? 0,
         name: m.name,
         email: m.email,
         phone: null,
         user_type: null,
         status: "active",
-      } satisfies User);
+      } satisfies User;
     });
-    setEditorUsers(usersForEditor.filter((u) => (u.status ?? "").toLowerCase() === "active"));
+    setEditorUsers(rosterUsers);
     const nextDraft: typeof memberDraft = {};
-    for (const u of usersForEditor) {
-      const found = members.find((m) => Number(m.user_id) === Number(u.user_id));
-      nextDraft[u.user_id] = {
-        included: Boolean(found),
-        max_open_tickets_cap: found?.max_open_tickets_cap ?? null,
+    for (const m of members) {
+      const uid = Number(m.user_id);
+      nextDraft[uid] = {
+        max_open_tickets_cap: m.max_open_tickets_cap ?? null,
       };
     }
     setMemberDraft(nextDraft);
@@ -632,36 +674,29 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
 
   const editingTeam = editingTeamId ? teamById.get(editingTeamId) : null;
 
-  function getMemberUserIdsIncluded() {
-    return Object.entries(memberDraft)
-      .filter(([, v]) => v.included)
-      .map(([uid]) => Number(uid));
-  }
-
-  const teamCapacityDraftTotal = useMemo(
-    () =>
-      Object.values(memberDraft).reduce((sum, item) => {
-        if (!item?.included) return sum;
-        const cap = item.max_open_tickets_cap;
-        if (typeof cap !== "number" || !Number.isFinite(cap) || cap <= 0) return sum;
-        return sum + cap;
-      }, 0),
-    [memberDraft]
-  );
-
-  const teamMemberCountDraft = useMemo(
-    () => Object.values(memberDraft).filter((item) => item?.included).length,
-    [memberDraft]
-  );
+  const teamCapacityDraftSummary = useMemo(() => {
+    const idArr = editorUsers.map((u) => Number(u.user_id));
+    let finite = 0;
+    let anyUnlimited = false;
+    for (const uid of idArr) {
+      const cap = memberDraft[uid]?.max_open_tickets_cap;
+      if (cap == null) anyUnlimited = true;
+      else {
+        const n = Number(cap);
+        if (Number.isFinite(n) && n > 0) finite += n;
+      }
+    }
+    return { finite, anyUnlimited, memberCount: idArr.length };
+  }, [editorUsers, memberDraft]);
 
   async function handleSaveMembers() {
     if (!editingTeamId) return;
     setSavingMembers(true);
     try {
-      const membersPayload = getMemberUserIdsIncluded().map((user_id) => ({
-        user_id,
+      const membersPayload = editorUsers.map((u) => ({
+        user_id: Number(u.user_id),
         is_team_lead: false,
-        max_open_tickets_cap: memberDraft[user_id]?.max_open_tickets_cap ?? null,
+        max_open_tickets_cap: memberDraft[Number(u.user_id)]?.max_open_tickets_cap ?? null,
       }));
       await setTeamMembersApi(editingTeamId, membersPayload);
       setRefreshTick((x) => x + 1);
@@ -676,29 +711,76 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
     }
   }
 
-  const totalCapacity = Object.values(teamStatsById).reduce((sum, v) => sum + v.capacity, 0);
-  const estimatedDemand = queues.length * 12;
-  const globalLoadFactor = totalCapacity > 0 ? Math.min(100, Math.round((estimatedDemand / totalCapacity) * 100)) : 0;
+  const systemAdminOrgPickerOptions = useMemo(() => {
+    if (!isSystemAdminUser) return [];
+    const m = new Map<string, string>();
+    m.set("1", ORG1_NAME);
+    for (const o of externalOrgs) {
+      const id = String(o.id);
+      m.set(id, o.organization_name?.trim() || `Organization ${id}`);
+    }
+    for (const t of teams) {
+      const id = String(t.organisation_id);
+      if (!m.has(id)) {
+        const n = Number(id);
+        m.set(id, n === 1 ? ORG1_NAME : `Organization ${id}`);
+      }
+    }
+    for (const q of queues) {
+      const id = String(q.organisation_id);
+      if (!m.has(id)) {
+        const n = Number(id);
+        m.set(id, n === 1 ? ORG1_NAME : `Organization ${id}`);
+      }
+    }
+    const current = String(orgId);
+    if (current && !m.has(current)) {
+      const n = Number(current);
+      m.set(current, n === 1 ? ORG1_NAME : `Organization ${n}`);
+    }
+    return Array.from(m.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => {
+        if (a.id === "1") return -1;
+        if (b.id === "1") return 1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [isSystemAdminUser, externalOrgs, teams, queues, orgId]);
+
+  const queuesForPageOrg = useMemo(
+    () => queues.filter((q) => String(q.organisation_id) === String(orgId)),
+    [queues, orgId]
+  );
+
+  const teamsForCurrentOrg = useMemo(
+    () => teams.filter((t) => String(t.organisation_id) === String(orgId)),
+    [teams, orgId]
+  );
+  const orgHasUnlimitedTeamCapacity = teamsForCurrentOrg.some((t) => teamStatsById[t.id]?.capacity === null);
+  const totalCapacityFinite = teamsForCurrentOrg.reduce((sum, t) => {
+    const c = teamStatsById[t.id]?.capacity;
+    if (c == null) return sum;
+    return sum + c;
+  }, 0);
+  const waitingTicketsTotalForOrg = useMemo(
+    () => queuesForPageOrg.reduce((sum, q) => sum + (waitingTicketsByQueueId[Number(q.id)] ?? 0), 0),
+    [queuesForPageOrg, waitingTicketsByQueueId]
+  );
+  const estimatedDemand = waitingTicketsTotalForOrg;
+  const globalLoadFactor =
+    orgHasUnlimitedTeamCapacity || totalCapacityFinite <= 0
+      ? 0
+      : Math.min(100, Math.round((estimatedDemand / totalCapacityFinite) * 100));
   const activeAgents = users.filter((u) => (u.status ?? "").toLowerCase() === "active").length;
   const avgResolutionMins = 14;
+
   const filteredQueues = useMemo(() => {
-    return queues.filter((q) => {
-      const byOrg = queueFilter.orgId === "all" || String(q.organisation_id) === queueFilter.orgId;
+    return queuesForPageOrg.filter((q) => {
       const byProduct =
         queueFilter.productIds.length === 0 || queueFilter.productIds.includes(String(q.product_id ?? ""));
-      return byOrg && byProduct;
+      return byProduct;
     });
-  }, [queues, queueFilter]);
-  const queueOrgOptions = useMemo(() => {
-    const uniqueOrgIds = Array.from(new Set(queues.map((q) => Number(q.organisation_id)).filter((id) => Number.isFinite(id))));
-    return uniqueOrgIds.map((id) => {
-      const name =
-        id === 1
-          ? ORG1_NAME
-          : externalOrgs.find((o) => Number(o.id) === id)?.organization_name ?? `Organization ${id}`;
-      return { id: String(id), name };
-    });
-  }, [queues, externalOrgs]);
+  }, [queuesForPageOrg, queueFilter.productIds]);
   const teamManagerOrgOptions = useMemo(() => {
     const uniqueOrgIds = Array.from(new Set(teams.map((t) => Number(t.organisation_id)).filter((id) => Number.isFinite(id))));
     return uniqueOrgIds.map((id) => ({
@@ -783,18 +865,14 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
     if (!q) return sorted;
     return sorted.filter((u) => (u.name || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q));
   }, [editorUsers, manageTeamUserSearch]);
-  const orgScopedQueues = useMemo(() => {
-    if (!queueFilter.orgId || queueFilter.orgId === "all") return queues;
-    return queues.filter((q) => String(q.organisation_id) === queueFilter.orgId);
-  }, [queues, queueFilter.orgId]);
   const productOptionsForSelectedOrg = useMemo(() => {
-    const source = orgScopedQueues;
+    const source = queuesForPageOrg;
     const set = new Set<number>();
     source.forEach((q) => {
       if (q.product_id != null) set.add(Number(q.product_id));
     });
     return Array.from(set.values());
-  }, [orgScopedQueues]);
+  }, [queuesForPageOrg]);
 
   const productFilterIdsSorted = useMemo(() => {
     return [...productOptionsForSelectedOrg].sort((a, b) => {
@@ -815,8 +893,23 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
     if (!Number.isFinite(createOrgId)) return false;
     if (!createQueueForm.name.trim()) return false;
     if (!createQueueForm.product_id) return false;
+    const productNum = Number(createQueueForm.product_id);
+    if (
+      !createQueueForm.create_for_all_organisations &&
+      Number.isFinite(productNum) &&
+      organisationHasQueueForProduct(queues, createOrgId, productNum)
+    ) {
+      return false;
+    }
     return true;
-  }, [createQueueForm.name, createQueueForm.organisation_id, createQueueForm.product_id, orgId]);
+  }, [
+    createQueueForm.name,
+    createQueueForm.organisation_id,
+    createQueueForm.product_id,
+    createQueueForm.create_for_all_organisations,
+    orgId,
+    queues,
+  ]);
 
   const teamsForCreateQueueOrg = useMemo(() => {
     if (createQueueOrgIdNum == null) return [];
@@ -877,30 +970,57 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
             Functional grouping of agents and capacity management.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setManageTeamsOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200"
-          >
-            Manage All Teams
-          </button>
-          <button
-            type="button"
-            onClick={() => setCreateTeamOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E88E5] px-3 py-2 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(30,136,229,0.35)]"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Create Team
-          </button>
-          <button
-            type="button"
-            onClick={() => setCreateQueueOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200"
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Create Queue
-          </button>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {isSystemAdminUser && onOrgChange ? (
+            <label className="grid min-w-[140px] max-w-[min(100%,280px)] shrink-0 gap-1">
+              <span className="text-[9px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                Organization
+              </span>
+              <select
+                value={orgId}
+                onChange={(e) => onOrgChange(e.target.value)}
+                className="w-full rounded-lg border border-black/10 bg-white/85 px-3 py-2 text-xs font-semibold text-[#111827] dark:border-white/15 dark:bg-white/10 dark:text-slate-100"
+              >
+                {systemAdminOrgPickerOptions.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify}
+              onClick={() => setManageTeamsOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-slate-200"
+            >
+              Manage All Teams
+            </button>
+          </InstantTooltip>
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify}
+              onClick={() => setCreateTeamOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#1E88E5] px-3 py-2 text-xs font-semibold text-white shadow-[0_6px_18px_rgba(30,136,229,0.35)] disabled:opacity-60"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Create Team
+            </button>
+          </InstantTooltip>
+          <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+            <button
+              type="button"
+              disabled={!canModify}
+              onClick={() => setCreateQueueOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold text-slate-700 disabled:opacity-60 dark:border-white/15 dark:bg-white/10 dark:text-slate-200"
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Create Queue
+            </button>
+          </InstantTooltip>
         </div>
       </div>
 
@@ -921,13 +1041,23 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <GlassCard className="border-black/10 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.06]">
               <div className="text-[10px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">Total Active Queues</div>
-              <div className="mt-2 text-xl font-semibold text-[#111827] dark:text-slate-100">{queues.length}</div>
+              <div className="mt-2 text-xl font-semibold text-[#111827] dark:text-slate-100">{queuesForPageOrg.length}</div>
             </GlassCard>
             <GlassCard className="border-black/10 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.06]">
               <div className="text-[10px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">Global Load Factor</div>
-              <div className="mt-2 text-xl font-semibold text-[#111827] dark:text-slate-100">{globalLoadFactor}%</div>
+              <div className="mt-2 text-xl font-semibold text-[#111827] dark:text-slate-100">
+                {orgHasUnlimitedTeamCapacity ? "—" : `${globalLoadFactor}%`}
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                {orgHasUnlimitedTeamCapacity
+                  ? "Unlimited member cap on at least one team; load % not computed."
+                  : "Open tickets vs summed finite team caps."}
+              </div>
               <div className="mt-2 h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700">
-                <div className="h-full rounded-full bg-[#1E88E5]" style={{ width: `${globalLoadFactor}%` }} />
+                <div
+                  className="h-full rounded-full bg-[#1E88E5]"
+                  style={{ width: `${orgHasUnlimitedTeamCapacity ? 0 : globalLoadFactor}%` }}
+                />
               </div>
             </GlassCard>
             <GlassCard className="border-black/10 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.06]">
@@ -938,7 +1068,6 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
             <GlassCard className="border-black/10 bg-white/70 p-4 dark:border-white/10 dark:bg-white/[0.06]">
               <div className="text-[10px] font-bold uppercase tracking-wide text-slate-600 dark:text-slate-300">Avg Resolution Time</div>
               <div className="mt-2 text-xl font-semibold text-[#111827] dark:text-slate-100">{avgResolutionMins}m</div>
-              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">last period baseline</div>
             </GlassCard>
           </div>
 
@@ -954,7 +1083,6 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                   >
                     Filter
                   </button>
-                  <button type="button" className="rounded-full border border-black/10 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-slate-600 dark:border-white/15 dark:bg-white/10 dark:text-slate-300">Export Stats</button>
                 </div>
               </div>
               <div className="space-y-3">
@@ -970,8 +1098,9 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                     ? externalOrgs.find((o) => Number(o.id) === Number(q.organisation_id))?.organization_name ??
                       `Organization ${q.organisation_id}`
                     : null;
-                  const queueDemand = Math.max(8, Math.round((teamStats?.capacity ?? 0) * 0.7));
-                  const status = teamStats && queueDemand > (teamStats.capacity || 0) ? "high" : "stable";
+                  const ticketsWaiting = waitingTicketsByQueueId[Number(q.id)] ?? 0;
+                  const loadLevel = loadLevelFromScore(ticketsWaiting);
+
                   return (
                     <GlassCard key={q.id} className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
                       <div className="flex items-start justify-between gap-3">
@@ -997,82 +1126,118 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                             ) : null}
                           </div>
                         </div>
-                        <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${status === "high" ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300" : "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300"}`}>
-                          {status === "high" ? "HIGH LOAD" : "STABLE"}
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
+                            loadLevel === "high"
+                              ? "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300"
+                              : loadLevel === "medium"
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200"
+                                : "bg-sky-100 text-sky-700 dark:bg-sky-500/20 dark:text-sky-300"
+                          }`}
+                        >
+                          {loadLevel === "high" ? "HIGH LOAD" : loadLevel === "medium" ? "MEDIUM LOAD" : "STABLE"}
                         </span>
                       </div>
                       <div className="mt-3 flex items-center justify-between">
                         <div className="text-xs font-semibold text-[#111827] dark:text-slate-100">
-                          Assigned Agents (
-                          {team ? (teamStats?.members ?? 0) : 0}/
-                          {team ? (orgScopedUserCountByOrgId[q.organisation_id] ?? 0) : 0}
-                          )
+                          Assigned Agents ({team ? teamStats?.members ?? 0 : 0})
                         </div>
                         {team ? (
                           <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openEditQueueModal(q)}
-                              title="Edit queue"
-                              aria-label={`Edit queue ${q.name}`}
-                              className="rounded-full p-1 text-slate-600 transition hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => void openMemberEditor(team.id)}
-                              className="text-[11px] font-semibold text-[#1E88E5]"
-                            >
-                              Manage Team
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setQueuePendingDelete(q)}
-                              disabled={deletingQueueId === q.id}
-                              title="Delete queue"
-                              aria-label={`Delete queue ${q.name}`}
-                              className="rounded-full p-1 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-500/10"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                disabled={!canModify}
+                                onClick={() => openEditQueueModal(q)}
+                                title="Edit queue"
+                                aria-label={`Edit queue ${q.name}`}
+                                className="rounded-full p-1 text-slate-600 transition hover:bg-black/5 disabled:opacity-60 dark:text-slate-300 dark:hover:bg-white/10"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            </InstantTooltip>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                disabled={!canModify}
+                                onClick={() => void openMemberEditor(team.id)}
+                                className="text-[11px] font-semibold text-[#1E88E5] disabled:opacity-60"
+                              >
+                                Manage Team
+                              </button>
+                            </InstantTooltip>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                onClick={() => setQueuePendingDelete(q)}
+                                disabled={!canModify || deletingQueueId === q.id}
+                                title="Delete queue"
+                                aria-label={`Delete queue ${q.name}`}
+                                className="rounded-full p-1 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-500/10"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </InstantTooltip>
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openEditQueueModal(q)}
-                              title="Edit queue"
-                              aria-label={`Edit queue ${q.name}`}
-                              className="rounded-full p-1 text-slate-600 transition hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setQueuePendingDelete(q)}
-                              disabled={deletingQueueId === q.id}
-                              title="Delete queue"
-                              aria-label={`Delete queue ${q.name}`}
-                              className="rounded-full p-1 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-500/10"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                disabled={!canModify}
+                                onClick={() => openEditQueueModal(q)}
+                                title="Edit queue"
+                                aria-label={`Edit queue ${q.name}`}
+                                className="rounded-full p-1 text-slate-600 transition hover:bg-black/5 disabled:opacity-60 dark:text-slate-300 dark:hover:bg-white/10"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                            </InstantTooltip>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                onClick={() => setQueuePendingDelete(q)}
+                                disabled={!canModify || deletingQueueId === q.id}
+                                title="Delete queue"
+                                aria-label={`Delete queue ${q.name}`}
+                                className="rounded-full p-1 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-500/10"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </InstantTooltip>
                           </div>
                         )}
                       </div>
                       <div className="mt-3 grid grid-cols-3 gap-2 rounded-xl border border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.04]">
                         <div>
                           <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Workload</div>
-                          <div className="text-xs font-semibold text-red-600 dark:text-red-300">{status === "high" ? "High" : "Normal"}</div>
+                          <div
+                            className={`text-xs font-semibold ${
+                              loadLevel === "high"
+                                ? "text-red-600 dark:text-red-300"
+                                : loadLevel === "medium"
+                                  ? "text-amber-700 dark:text-amber-300"
+                                  : "text-emerald-700 dark:text-emerald-300"
+                            }`}
+                          >
+                            {loadLevel === "high" ? "High" : loadLevel === "medium" ? "Medium" : "Stable"}
+                          </div>
                         </div>
                         <div>
                           <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Team Capacity</div>
-                          <div className="text-xs font-semibold text-[#111827] dark:text-slate-100">{teamStats?.capacity ?? 0}</div>
+                          <div className="text-xs font-semibold text-[#111827] dark:text-slate-100">
+                            {teamStats?.capacity === null ? "∞" : teamStats?.capacity ?? 0}
+                          </div>
+                          {teamStats?.capacity === null ? (
+                            <div className="text-[10px] text-slate-500 dark:text-slate-400">Includes unlimited</div>
+                          ) : null}
                         </div>
                         <div>
-                          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">Tickets Waiting</div>
-                          <div className="text-xs font-semibold text-[#111827] dark:text-slate-100">{queueDemand}</div>
+                          <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            Tickets Waiting
+                          </div>
+                          <div className="text-[10px] text-slate-500 dark:text-slate-400">Open, pending, escalated</div>
+                          <div className="text-xs font-semibold text-[#111827] dark:text-slate-100">{ticketsWaiting}</div>
                         </div>
                       </div>
                     </GlassCard>
@@ -1117,21 +1282,7 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 </button>
               </GlassCard>
 
-              <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
-                <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[#111827] dark:text-slate-100">
-                  <BarChart3 className="h-4 w-4 text-[#1E88E5]" />
-                  Volume Trends (24h)
-                </div>
-                <div className="flex h-[90px] items-end gap-1.5">
-                  {[22, 36, 30, 62, 72, 54, 42, 26, 12].map((h, i) => (
-                    <div
-                      key={i}
-                      className={`w-full rounded-sm ${i === 4 || i === 3 || i === 5 ? "bg-[#1E88E5]" : "bg-slate-300 dark:bg-slate-600"}`}
-                      style={{ height: `${h}px` }}
-                    />
-                  ))}
-                </div>
-              </GlassCard>
+          
             </div>
           </div>
         </div>
@@ -1206,26 +1357,31 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setManageTeamsOpen(false);
-                                setEditingTeamId(t.id);
-                              }}
-                              className="text-[11px] font-semibold text-[#1E88E5]"
-                            >
-                              Manage Members
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setTeamPendingDelete(t)}
-                              disabled={deletingTeamId === t.id}
-                              title="Delete team"
-                              aria-label={`Delete team ${t.name}`}
-                              className="rounded-full p-1 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-500/10"
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                disabled={!canModify}
+                                onClick={() => {
+                                  setManageTeamsOpen(false);
+                                  setEditingTeamId(t.id);
+                                }}
+                                className="text-[11px] font-semibold text-[#1E88E5] disabled:opacity-60"
+                              >
+                                Manage Members
+                              </button>
+                            </InstantTooltip>
+                            <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                              <button
+                                type="button"
+                                onClick={() => setTeamPendingDelete(t)}
+                                disabled={!canModify || deletingTeamId === t.id}
+                                title="Delete team"
+                                aria-label={`Delete team ${t.name}`}
+                                className="rounded-full p-1 text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-red-300 dark:hover:bg-red-500/10"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </InstantTooltip>
                           </div>
                         </div>
                       </div>
@@ -1447,7 +1603,9 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
               </div>
               <div className="flex justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <button type="button" onClick={() => setCreateTeamOpen(false)} className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300">Cancel</button>
-                <button type="button" onClick={() => void handleCreateTeam()} disabled={creatingTeam || !canCreateTeam} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{creatingTeam ? "Creating..." : "Create Team"}</button>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button type="button" onClick={() => void handleCreateTeam()} disabled={!canModify || creatingTeam || !canCreateTeam} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{creatingTeam ? "Creating..." : "Create Team"}</button>
+                </InstantTooltip>
               </div>
             </div>
           </div>,
@@ -1462,25 +1620,8 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 <div className="text-base font-semibold text-[#111827] dark:text-slate-100">Filter Operational Queues</div>
                 <button type="button" onClick={() => setFilterOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
-              <div className="grid grid-cols-1 gap-3 p-5 md:grid-cols-2">
-                {isSystemAdminUser ? (
-                  <label className="grid gap-1">
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Organization</span>
-                    <select
-                      value={queueFilter.orgId}
-                      onChange={(e) => setQueueFilter((f) => ({ ...f, orgId: e.target.value }))}
-                      className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10"
-                    >
-                      <option value="all">All Organizations</option>
-                      {queueOrgOptions.map((o) => (
-                        <option key={o.id} value={o.id}>
-                          {o.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : null}
-                <label className="grid gap-1 md:col-span-2">
+              <div className="grid grid-cols-1 gap-3 p-5">
+                <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Product</span>
                   <div className="rounded-xl border border-black/10 bg-white/85 p-2 dark:border-white/15 dark:bg-white/10">
                     <div className="mb-2 flex items-center justify-between">
@@ -1535,7 +1676,7 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
               <div className="flex justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <button
                   type="button"
-                  onClick={() => setQueueFilter({ orgId: "all", productIds: [] })}
+                  onClick={() => setQueueFilter({ productIds: [] })}
                   className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300"
                 >
                   Reset
@@ -1567,7 +1708,23 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                     <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Select Organization *</span>
                     <select
                       value={createQueueForm.organisation_id}
-                      onChange={(e) => setCreateQueueForm((f) => ({ ...f, organisation_id: e.target.value, team_id: "" }))}
+                      onChange={(e) => {
+                        const organisation_id = e.target.value;
+                        setCreateQueueForm((f) => {
+                          const next = { ...f, organisation_id, team_id: "" };
+                          const orgNum = Number(organisation_id || orgId);
+                          const pid = f.product_id ? Number(f.product_id) : NaN;
+                          if (
+                            !f.create_for_all_organisations &&
+                            Number.isFinite(orgNum) &&
+                            Number.isFinite(pid) &&
+                            organisationHasQueueForProduct(queues, orgNum, pid)
+                          ) {
+                            next.product_id = "";
+                          }
+                          return next;
+                        });
+                      }}
                       disabled={createQueueForm.create_for_all_organisations}
                       className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10 disabled:opacity-60"
                     >
@@ -1604,6 +1761,9 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 </label>
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Product *</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                    Only products without a queue for this organisation are available (one queue per product).
+                  </span>
                   <select
                     value={createQueueForm.product_id}
                     onChange={(e) =>
@@ -1612,7 +1772,19 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                     className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10"
                   >
                     <option value="">Select specific product</option>
-                    {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    {products.map((p) => {
+                      const createOrgId = Number(createQueueForm.organisation_id || orgId);
+                      const taken =
+                        !createQueueForm.create_for_all_organisations &&
+                        Number.isFinite(createOrgId) &&
+                        organisationHasQueueForProduct(queues, createOrgId, Number(p.id));
+                      return (
+                        <option key={p.id} value={p.id} disabled={taken}>
+                          {p.name}
+                          {taken ? " — already has a queue" : ""}
+                        </option>
+                      );
+                    })}
                   </select>
                 </label>
                 <label className="grid gap-1">
@@ -1644,7 +1816,9 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
               </div>
               <div className="flex justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <button type="button" onClick={() => setCreateQueueOpen(false)} className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300">Cancel</button>
-                <button type="button" onClick={() => void handleCreateQueue()} disabled={creatingQueue || !canCreateQueue} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{creatingQueue ? "Creating..." : "Create Queue"}</button>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button type="button" onClick={() => void handleCreateQueue()} disabled={!canModify || creatingQueue || !canCreateQueue} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{creatingQueue ? "Creating..." : "Create Queue"}</button>
+                </InstantTooltip>
               </div>
             </div>
           </div>,
@@ -1691,19 +1865,37 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                 </label>
                 <label className="grid gap-1">
                   <span className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Product</span>
+                  <span className="text-[10px] text-slate-500 dark:text-slate-400">
+                    Another queue in this organisation cannot use the same product.
+                  </span>
                   <select
                     value={editQueueForm.product_id}
                     onChange={(e) => setEditQueueForm((f) => ({ ...f, product_id: e.target.value, team_id: "" }))}
                     className="rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10"
                   >
                     <option value="">Select specific product</option>
-                    {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    {products.map((p) => {
+                      const editOrgNum = editQueueOrgIdNum;
+                      const isCurrentProduct = String(p.id) === editQueueForm.product_id;
+                      const taken =
+                        editOrgNum != null &&
+                        !isCurrentProduct &&
+                        organisationHasQueueForProduct(queues, editOrgNum, Number(p.id), editingQueueId);
+                      return (
+                        <option key={p.id} value={p.id} disabled={taken}>
+                          {p.name}
+                          {taken ? " — used by another queue" : ""}
+                        </option>
+                      );
+                    })}
                   </select>
                 </label>
               </div>
               <div className="flex justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <button type="button" onClick={() => setEditQueueOpen(false)} className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300">Cancel</button>
-                <button type="button" onClick={() => void handleUpdateQueue()} disabled={updatingQueue} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{updatingQueue ? "Saving..." : "Save Changes"}</button>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button type="button" onClick={() => void handleUpdateQueue()} disabled={!canModify || updatingQueue} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{updatingQueue ? "Saving..." : "Save Changes"}</button>
+                </InstantTooltip>
               </div>
             </div>
           </div>,
@@ -1768,8 +1960,17 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
               <div className="overflow-y-auto p-5">
                 <div className="mb-3 rounded-xl border border-black/10 bg-white/70 px-3 py-2 dark:border-white/15 dark:bg-white/[0.05]">
                   <div className="text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Team Capacity (Max Open Tickets)</div>
-                  <div className="mt-1 text-sm font-semibold text-[#111827] dark:text-slate-100">{teamCapacityDraftTotal} tickets</div>
-                  <div className="text-[11px] text-muted-foreground">Based on {teamMemberCountDraft} selected member(s) max-cap values.</div>
+                  <div className="mt-1 text-sm font-semibold text-[#111827] dark:text-slate-100">
+                    {teamCapacityDraftSummary.anyUnlimited
+                      ? teamCapacityDraftSummary.finite > 0
+                        ? `${teamCapacityDraftSummary.finite} + ∞`
+                        : "∞ (unlimited)"
+                      : `${teamCapacityDraftSummary.finite} tickets`}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Blank max cap = unlimited. {teamCapacityDraftSummary.memberCount} assigned agent
+                    {teamCapacityDraftSummary.memberCount === 1 ? "" : "s"}.
+                  </div>
                 </div>
                 <input
                   value={manageTeamUserSearch}
@@ -1778,50 +1979,34 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
                   className="mb-3 w-full rounded-xl border border-black/10 bg-white/85 px-3 py-2 text-xs dark:border-white/15 dark:bg-white/10"
                 />
                 <div className="mb-3 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
-                  Selected users: {teamMemberCountDraft} / {editorUsers.length}
+                  Assigned Agents ({editorUsers.length})
                 </div>
                 <div className="grid grid-cols-1 gap-2.5">
                   {visibleEditorUsers.map((u) => {
-                    const d = memberDraft[u.user_id];
-                    const included = Boolean(d?.included);
+                    const uid = Number(u.user_id);
+                    const d = memberDraft[uid];
                     return (
                       <div key={u.user_id} className="rounded-xl border border-black/10 bg-white/75 p-3 dark:border-white/15 dark:bg-white/[0.05]">
                         <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                           <div className="min-w-0">
-                            <label className="flex items-center gap-2 text-xs font-medium text-[#111827] dark:text-slate-100">
-                              <input
-                                type="checkbox"
-                                checked={included}
-                                onChange={(e) => {
-                                  const nextIncluded = e.target.checked;
-                                  setMemberDraft((prev) => ({
-                                    ...prev,
-                                    [u.user_id]: {
-                                      included: nextIncluded,
-                                      max_open_tickets_cap: prev[u.user_id]?.max_open_tickets_cap ?? null,
-                                    },
-                                  }));
-                                }}
-                              />
+                            <div className="text-xs font-medium text-[#111827] dark:text-slate-100">
                               <span className="truncate">{u.name}</span>
-                            </label>
+                            </div>
                             <div className="mt-1 text-[11px] text-muted-foreground">{u.email}</div>
                           </div>
                           <div className="grid gap-2 md:w-[300px]">
                             <label className="grid gap-1 text-[11px] text-muted-foreground">
-                              Max open tickets per member
+                              Max open tickets (blank = unlimited)
                               <input
                                 type="number"
                                 min={0}
                                 value={d?.max_open_tickets_cap ?? ""}
-                                disabled={!included}
                                 onChange={(e) => {
                                   const v = e.target.value;
                                   const next = v === "" ? null : Math.max(0, Math.floor(Number(v)));
                                   setMemberDraft((prev) => ({
                                     ...prev,
-                                    [u.user_id]: {
-                                      included: true,
+                                    [uid]: {
                                       max_open_tickets_cap: next,
                                     },
                                   }));
@@ -1838,7 +2023,9 @@ export function TeamsQueuesPage({ orgId }: { orgId: string }) {
               </div>
               <div className="flex justify-end gap-2 border-t border-black/10 bg-black/[0.02] px-5 py-4 dark:border-white/10 dark:bg-white/[0.03]">
                 <button type="button" onClick={() => setEditingTeamId(null)} className="rounded-lg px-4 py-2 text-xs font-semibold text-slate-700 dark:text-slate-300">Close</button>
-                <button type="button" onClick={() => void handleSaveMembers()} disabled={savingMembers} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{savingMembers ? "Saving..." : "Save Team Members"}</button>
+                <InstantTooltip disabled={!canModify} message={modifyAccessMessage}>
+                  <button type="button" onClick={() => void handleSaveMembers()} disabled={!canModify || savingMembers} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{savingMembers ? "Saving..." : "Save Team Members"}</button>
+                </InstantTooltip>
               </div>
             </div>
           </div>,

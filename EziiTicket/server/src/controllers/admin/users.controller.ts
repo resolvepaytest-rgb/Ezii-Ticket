@@ -3,6 +3,7 @@ import { pool } from "../../db/pool.js";
 import { asInt } from "./adminUtils.js";
 import { appendAdminAudit } from "./adminAudit.js";
 import { isEziiSystemAdmin } from "./eziiSystemAdmin.js";
+import { redistributeOpenTicketsForOooUsers } from "../../services/tickets/redistributeOooTickets.js";
 
 const TEMPLATE_ROLES_ORG_ID = 1;
 
@@ -153,7 +154,7 @@ export async function listUsers(req: Request, res: Response) {
     : null;
 
   const rows = await pool.query(
-    `select id, user_id, organisation_id, name, email, phone, user_type, status, type_id_1, out_of_office, created_at, updated_at
+    `select id, user_id, organisation_id, name, email, phone, user_type, status, type_id_1, out_of_office, ooo_start_date, ooo_end_date, created_at, updated_at
      from users
      where ($1::bigint is null or organisation_id = $1::bigint)
      order by id desc`,
@@ -170,7 +171,7 @@ export async function getUserByUserId(req: Request, res: Response) {
   }
 
   const result = await pool.query(
-    `select id, user_id, organisation_id, name, email, phone, user_type, status, out_of_office, created_at, updated_at
+    `select id, user_id, organisation_id, name, email, phone, user_type, status, out_of_office, ooo_start_date, ooo_end_date, created_at, updated_at
      from users where user_id=$1`,
     [userId]
   );
@@ -216,7 +217,7 @@ export async function createUser(req: Request, res: Response) {
       if (!isEziiSystemAdmin(req)) {
         return res.status(409).json({
           ok: false,
-          error: `user_id ${userId} already exists in organisation_id ${existingOrgId}; cannot create in organisation_id ${orgId}`,
+          error: `user_id ${userId} already exists; cannot create duplicate user`,
         });
       }
 
@@ -286,6 +287,48 @@ export async function updateUser(req: Request, res: Response) {
     typeof (req.body as { out_of_office?: unknown })?.out_of_office === "boolean"
       ? (req.body as { out_of_office: boolean }).out_of_office
       : null;
+  const hasStartPatch = Object.prototype.hasOwnProperty.call(req.body ?? {}, "ooo_start_date");
+  const hasEndPatch = Object.prototype.hasOwnProperty.call(req.body ?? {}, "ooo_end_date");
+  const toDateOrNull = (v: unknown): string | null | undefined => {
+    if (v === undefined) return undefined;
+    if (v === null) return null;
+    const s = String(v).trim();
+    if (!s) return null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return undefined;
+    return s;
+  };
+  const startPatch = toDateOrNull((req.body as { ooo_start_date?: unknown } | null)?.ooo_start_date);
+  const endPatch = toDateOrNull((req.body as { ooo_end_date?: unknown } | null)?.ooo_end_date);
+  if ((hasStartPatch && startPatch === undefined) || (hasEndPatch && endPatch === undefined)) {
+    return res.status(400).json({ ok: false, error: "ooo_start_date and ooo_end_date must be YYYY-MM-DD or null" });
+  }
+  if ((hasStartPatch || hasEndPatch) && ((startPatch == null) !== (endPatch == null))) {
+    return res.status(400).json({ ok: false, error: "both ooo_start_date and ooo_end_date are required together" });
+  }
+  if (startPatch && endPatch && startPatch > endPatch) {
+    return res.status(400).json({ ok: false, error: "ooo_start_date cannot be after ooo_end_date" });
+  }
+
+  const beforeResult = await pool.query<{
+    organisation_id: number;
+    out_of_office: boolean;
+    ooo_start_date: string | null;
+    ooo_end_date: string | null;
+  }>(
+    `select organisation_id, out_of_office, ooo_start_date::text, ooo_end_date::text
+     from users
+     where user_id = $1`,
+    [userId]
+  );
+  const before = beforeResult.rows[0];
+  if (!before) return res.status(404).json({ ok: false, error: "not found" });
+
+  const nextStart = hasStartPatch ? (startPatch ?? null) : before.ooo_start_date;
+  const nextEnd = hasEndPatch ? (endPatch ?? null) : before.ooo_end_date;
+  const todayYmd = new Date().toISOString().slice(0, 10);
+  const inScheduledRange = Boolean(nextStart && nextEnd && todayYmd >= nextStart && todayYmd <= nextEnd);
+  const nextOutOfOffice =
+    outOfOfficePatch !== null ? outOfOfficePatch : hasStartPatch || hasEndPatch ? inScheduledRange : before.out_of_office;
 
   const result = await pool.query(
     `update users
@@ -294,15 +337,23 @@ export async function updateUser(req: Request, res: Response) {
          phone = coalesce($4, phone),
          user_type = coalesce($5, user_type),
          status = coalesce($6, status),
-         out_of_office = coalesce($7::boolean, out_of_office),
+         out_of_office = $7::boolean,
+         ooo_start_date = $8::date,
+         ooo_end_date = $9::date,
          updated_at = now()
      where user_id=$1
-     returning id, user_id, organisation_id, name, email, phone, user_type, status, out_of_office, created_at, updated_at`,
-    [userId, name ?? null, email ?? null, phone ?? null, user_type ?? null, status ?? null, outOfOfficePatch]
+     returning id, user_id, organisation_id, name, email, phone, user_type, status, out_of_office, ooo_start_date, ooo_end_date, created_at, updated_at`,
+    [userId, name ?? null, email ?? null, phone ?? null, user_type ?? null, status ?? null, nextOutOfOffice, nextStart, nextEnd]
   );
 
   const row = result.rows[0];
   if (!row) return res.status(404).json({ ok: false, error: "not found" });
+  if (!before.out_of_office && Boolean(row.out_of_office)) {
+    await redistributeOpenTicketsForOooUsers({
+      organisationId: Number(row.organisation_id),
+      sourceUserIds: [userId],
+    });
+  }
   await appendAdminAudit(
     req,
     Number(row.organisation_id),
@@ -380,16 +431,9 @@ export async function setUserRoles(req: Request, res: Response) {
     }
   }
 
-  // For Ezii System Admin, optional scope_organisation_id allows cross-org workload mapping.
+  // Scoped assignment is allowed for any caller who already passed route-level users modify checks.
   const effectiveScopeOrgId = scopedOrgId ?? inferredScopeOrgId;
   const rolesOrgId = effectiveScopeOrgId ?? userOrgId;
-  const isCrossOrgScope = scopedOrgId != null && scopedOrgId !== userOrgId;
-  if (isCrossOrgScope && !isEziiSystemAdmin(req)) {
-    return res.status(403).json({
-      ok: false,
-      error: "Only Ezii System Admin can assign scoped roles across organisations.",
-    });
-  }
 
   let finalRoleIds = parsedRoleIds;
   if (isEziiSystemAdmin(req) && rolesOrgId !== TEMPLATE_ROLES_ORG_ID) {
@@ -967,6 +1011,8 @@ export async function listInvitedAgentUsersForOrganisation(req: Request, res: Re
        coalesce(u.status, 'active') as status,
        u.type_id_1,
        coalesce(u.out_of_office, false) as out_of_office,
+       u.ooo_start_date,
+       u.ooo_end_date,
        u.created_at,
        u.updated_at
      from user_scope_org uso
@@ -991,13 +1037,7 @@ export async function removeUserScopeOrg(req: Request, res: Response) {
     return res.status(400).json({ ok: false, error: "invalid requester organisation" });
   }
 
-  const isCrossOrgScope = scopeOrgId !== authOrgId;
-  if (isCrossOrgScope && !isEziiSystemAdmin(req)) {
-    return res.status(403).json({
-      ok: false,
-      error: "Only Ezii System Admin can remove scoped access across organisations.",
-    });
-  }
+  // Cross-org scoped removal is allowed for callers with users modify access.
 
   await pool.query("begin");
   try {

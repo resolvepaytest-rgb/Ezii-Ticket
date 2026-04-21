@@ -2,6 +2,7 @@ import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { pool } from "./db/pool.js";
 import { ensureStorageDirs } from "./storage/ensureStorageDirs.js";
+import { scheduleAttendanceOooMidnightSync } from "./services/automation/attendanceOooSync.js";
 import { runAutoCloseTick, runSlaTick } from "./services/automation/ticketLifecycle.js";
 
 async function logDbConnectionOnce() {
@@ -56,6 +57,14 @@ app.listen(env.port, () => {
         console.warn("[automation] runAutoCloseTick failed:", (err as Error).message);
       });
     }, autoCloseMs);
+  }
+
+  if (env.leaveBaseUrl && env.attendanceOooSyncEnabled) {
+    scheduleAttendanceOooMidnightSync();
+    // eslint-disable-next-line no-console
+    console.log(
+      `[attendance-ooo] midnight sync enabled (orgId=${env.attendanceOooSyncOrgId}, base=${env.leaveBaseUrl})`
+    );
   }
 });
 

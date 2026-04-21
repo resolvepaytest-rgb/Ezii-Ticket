@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { toast } from "sonner";
 import { GlassCard } from "@components/common/GlassCard";
 import { Loader } from "@components/common/Loader";
+import { InstantTooltip } from "@components/common/InstantTooltip";
+import { useScreenModifyAccess } from "@hooks/useScreenModifyAccess";
 import { useAuthStore } from "@store/useAuthStore";
 import {
   createSlaPolicy,
@@ -10,12 +12,13 @@ import {
   listSlaPolicies,
   listSlaTier1Bounds,
   putSlaTier1Bounds,
+  upsertSlaPoliciesBatch,
   updateSlaPolicy,
   type ExternalOrganization,
   type SlaPolicy,
   type SlaTier1BoundRow,
 } from "@api/adminApi";
-import { Calendar, Globe, Settings, ShieldCheck, X } from "lucide-react";
+import { Settings, X } from "lucide-react";
 
 type PriorityKey = "P1" | "P2" | "P3" | "P4";
 type TierKey = "tier1" | "tier2";
@@ -26,10 +29,10 @@ const FALLBACK_TIER1_BOUNDS: Record<
   PriorityKey,
   { minFirstResponseMins: number; maxFirstResponseMins: number; minResolutionMins: number; maxResolutionMins: number }
 > = {
-  P1: { minFirstResponseMins: 15, maxFirstResponseMins: 120, minResolutionMins: 30, maxResolutionMins: 120 },
-  P2: { minFirstResponseMins: 60, maxFirstResponseMins: 240, minResolutionMins: 120, maxResolutionMins: 1440 },
-  P3: { minFirstResponseMins: 240, maxFirstResponseMins: 2880, minResolutionMins: 1440, maxResolutionMins: 4320 },
-  P4: { minFirstResponseMins: 1440, maxFirstResponseMins: 7200, minResolutionMins: 2880, maxResolutionMins: 14400 },
+  P1: { minFirstResponseMins: 15, maxFirstResponseMins: 60, minResolutionMins: 120, maxResolutionMins: 480 },
+  P2: { minFirstResponseMins: 60, maxFirstResponseMins: 240, minResolutionMins: 240, maxResolutionMins: 2880 },
+  P3: { minFirstResponseMins: 120, maxFirstResponseMins: 480, minResolutionMins: 1440, maxResolutionMins: 7200 },
+  P4: { minFirstResponseMins: 240, maxFirstResponseMins: 2880, minResolutionMins: 4320, maxResolutionMins: 20160 },
 };
 
 const TIER1_DEFINITIONS: Record<PriorityKey, string> = {
@@ -43,7 +46,7 @@ const TIER1_CUSTOMER_DEFAULTS: Record<PriorityKey, { firstResponseMins: number; 
   P1: { firstResponseMins: 30, resolutionMins: 240 },
   P2: { firstResponseMins: 120, resolutionMins: 1440 },
   P3: { firstResponseMins: 240, resolutionMins: 4320 },
-  P4: { firstResponseMins: 1440, resolutionMins: 7200 },
+  P4: { firstResponseMins: 1440, resolutionMins: 10080 },
 };
 
 /** PRD §3.3.2 — Internal Ezii SLA (L2 / L3 ladder), minutes. */
@@ -143,8 +146,10 @@ function policyMapByPriority(rows: SlaPolicy[], tier: TierKey) {
   return out;
 }
 
-function boundsMapFromRows(rows: SlaTier1BoundRow[] | undefined): Record<PriorityKey, (typeof FALLBACK_TIER1_BOUNDS)[PriorityKey]> {
-  const out = { ...FALLBACK_TIER1_BOUNDS };
+function boundsMapFromRows(
+  rows: SlaTier1BoundRow[] | undefined
+): Partial<Record<PriorityKey, (typeof FALLBACK_TIER1_BOUNDS)[PriorityKey]>> {
+  const out: Partial<Record<PriorityKey, (typeof FALLBACK_TIER1_BOUNDS)[PriorityKey]>> = {};
   if (!rows?.length) return out;
   for (const r of rows) {
     const p = toPriority(r.priority);
@@ -186,23 +191,25 @@ type BoundsDraftRow = {
 export function SlaPoliciesPage({
   orgId,
   organizationName,
-  tier1Access: _tier1AccessProp,
-  tier2Access: _tier2AccessProp,
+  tier1Access: tier1AccessProp,
+  tier2Access: tier2AccessProp,
 }: {
   orgId: string;
   organizationName?: string;
   tier1Access?: AccessLevel;
   tier2Access?: AccessLevel;
 }) {
-  void _tier1AccessProp;
-  void _tier2AccessProp;
   const authUser = useAuthStore((s) => s.user);
   const orgIdNum = useMemo(() => {
     const n = Number(orgId);
     return Number.isFinite(n) ? n : null;
   }, [orgId]);
   const isSystemAdmin = useMemo(() => isEziiSystemAdminUser(authUser), [authUser]);
-  const canEdit = isSystemAdmin;
+  const canModifySlaScreen = useScreenModifyAccess("sla_policies");
+  const canEditTier1 = isSystemAdmin || tier1AccessProp === "edit" || canModifySlaScreen;
+  const canEditTier2 = isSystemAdmin || tier2AccessProp === "edit" || canModifySlaScreen;
+  const canEdit = canEditTier1 || canEditTier2;
+  const modifyAccessMessage = "You don't have modify access";
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -212,6 +219,8 @@ export function SlaPoliciesPage({
   const [searchOrg, setSearchOrg] = useState("");
   const [editingOrgId, setEditingOrgId] = useState<number | null>(null);
   const [savingOverride, setSavingOverride] = useState(false);
+  const [globalEditMode, setGlobalEditMode] = useState(false);
+  const [savingGlobal, setSavingGlobal] = useState(false);
   const [overrideDraft, setOverrideDraft] = useState<
     Record<PriorityKey, { first_response_mins: number; resolution_mins: number; sourceId: number | null }>
   >({
@@ -242,10 +251,16 @@ export function SlaPoliciesPage({
         setRowsByOrg(Object.fromEntries(results.map((r) => [r.id, r.rows])));
         setBoundsByOrg(Object.fromEntries(boundsResults.map((b) => [b.id, b.rows])));
       } else {
-        const own = await listSlaPolicies(orgIdNum);
-        const b = await listSlaTier1Bounds(orgIdNum).catch(() => [] as SlaTier1BoundRow[]);
-        setRowsByOrg({ [orgIdNum]: own });
-        setBoundsByOrg({ [orgIdNum]: b });
+        // Non-system-admin users can still have SLA modify access; always load org 1
+        // so Global Tier 1/2 tables render persisted global values instead of fallback constants.
+        const [own, globalRows, ownBounds, globalBounds] = await Promise.all([
+          listSlaPolicies(orgIdNum).catch(() => [] as SlaPolicy[]),
+          listSlaPolicies(1).catch(() => [] as SlaPolicy[]),
+          listSlaTier1Bounds(orgIdNum).catch(() => [] as SlaTier1BoundRow[]),
+          listSlaTier1Bounds(1).catch(() => [] as SlaTier1BoundRow[]),
+        ]);
+        setRowsByOrg({ [orgIdNum]: own, 1: globalRows });
+        setBoundsByOrg({ [orgIdNum]: ownBounds, 1: globalBounds });
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load SLA policies");
@@ -262,7 +277,49 @@ export function SlaPoliciesPage({
   const globalRows = useMemo(() => rowsByOrg[1] ?? [], [rowsByOrg]);
   const globalTier1 = useMemo(() => policyMapByPriority(globalRows, "tier1"), [globalRows]);
   const globalTier2 = useMemo(() => policyMapByPriority(globalRows, "tier2"), [globalRows]);
-  const globalBoundsMap = useMemo(() => boundsMapFromRows(boundsByOrg[1]), [boundsByOrg]);
+  const [globalTier1Draft, setGlobalTier1Draft] = useState<
+    Record<PriorityKey, { first_response_mins: number; resolution_mins: number }>
+  >({
+    P1: { first_response_mins: TIER1_CUSTOMER_DEFAULTS.P1.firstResponseMins, resolution_mins: TIER1_CUSTOMER_DEFAULTS.P1.resolutionMins },
+    P2: { first_response_mins: TIER1_CUSTOMER_DEFAULTS.P2.firstResponseMins, resolution_mins: TIER1_CUSTOMER_DEFAULTS.P2.resolutionMins },
+    P3: { first_response_mins: TIER1_CUSTOMER_DEFAULTS.P3.firstResponseMins, resolution_mins: TIER1_CUSTOMER_DEFAULTS.P3.resolutionMins },
+    P4: { first_response_mins: TIER1_CUSTOMER_DEFAULTS.P4.firstResponseMins, resolution_mins: TIER1_CUSTOMER_DEFAULTS.P4.resolutionMins },
+  });
+  const [globalTier2Draft, setGlobalTier2Draft] = useState<
+    Record<PriorityKey, { l2Ack: number; l2Pass: number; l3Ack: number; l3Res: number }>
+  >({
+    P1: { ...TIER2_INTERNAL_PRESETS.P1 },
+    P2: { ...TIER2_INTERNAL_PRESETS.P2 },
+    P3: { ...TIER2_INTERNAL_PRESETS.P3 },
+    P4: { ...TIER2_INTERNAL_PRESETS.P4 },
+  });
+
+  useEffect(() => {
+    setGlobalTier1Draft({
+      P1: {
+        first_response_mins: globalTier1.P1?.first_response_mins ?? TIER1_CUSTOMER_DEFAULTS.P1.firstResponseMins,
+        resolution_mins: globalTier1.P1?.resolution_mins ?? TIER1_CUSTOMER_DEFAULTS.P1.resolutionMins,
+      },
+      P2: {
+        first_response_mins: globalTier1.P2?.first_response_mins ?? TIER1_CUSTOMER_DEFAULTS.P2.firstResponseMins,
+        resolution_mins: globalTier1.P2?.resolution_mins ?? TIER1_CUSTOMER_DEFAULTS.P2.resolutionMins,
+      },
+      P3: {
+        first_response_mins: globalTier1.P3?.first_response_mins ?? TIER1_CUSTOMER_DEFAULTS.P3.firstResponseMins,
+        resolution_mins: globalTier1.P3?.resolution_mins ?? TIER1_CUSTOMER_DEFAULTS.P3.resolutionMins,
+      },
+      P4: {
+        first_response_mins: globalTier1.P4?.first_response_mins ?? TIER1_CUSTOMER_DEFAULTS.P4.firstResponseMins,
+        resolution_mins: globalTier1.P4?.resolution_mins ?? TIER1_CUSTOMER_DEFAULTS.P4.resolutionMins,
+      },
+    });
+    setGlobalTier2Draft({
+      P1: tier2Resolved(globalTier2.P1, "P1"),
+      P2: tier2Resolved(globalTier2.P2, "P2"),
+      P3: tier2Resolved(globalTier2.P3, "P3"),
+      P4: tier2Resolved(globalTier2.P4, "P4"),
+    });
+  }, [globalTier1, globalTier2]);
 
   const overrideOrgCards = useMemo(() => {
     const ownOrgLabel = organizationName?.trim() || `Organization ${orgIdNum ?? "-"}`;
@@ -280,7 +337,7 @@ export function SlaPoliciesPage({
         const compliant = PRIORITY_ORDER.every((p) => {
           const row = tier1[p];
           if (!row) return true;
-          const bounds = bm[p];
+          const bounds = bm[p] ?? FALLBACK_TIER1_BOUNDS[p];
           const t2 = tier2Resolved(globalTier2[p], p);
           const inRange =
             row.first_response_mins >= bounds.minFirstResponseMins &&
@@ -306,10 +363,10 @@ export function SlaPoliciesPage({
     const bm = boundsMapFromRows(boundsByOrg[orgIdValue]);
     setEditingOrgId(orgIdValue);
     setBoundsDraft({
-      P1: { ...bm.P1 },
-      P2: { ...bm.P2 },
-      P3: { ...bm.P3 },
-      P4: { ...bm.P4 },
+      P1: { ...(bm.P1 ?? FALLBACK_TIER1_BOUNDS.P1) },
+      P2: { ...(bm.P2 ?? FALLBACK_TIER1_BOUNDS.P2) },
+      P3: { ...(bm.P3 ?? FALLBACK_TIER1_BOUNDS.P3) },
+      P4: { ...(bm.P4 ?? FALLBACK_TIER1_BOUNDS.P4) },
     });
     setOverrideDraft({
       P1: {
@@ -379,7 +436,7 @@ export function SlaPoliciesPage({
 
   async function saveOverride() {
     if (!editingOrgId || !boundsDraft) return;
-    if (!canEdit) return toast.error("Only system admin can update overrides");
+    if (!canEdit) return toast.error("You do not have modify access for SLA settings");
     setSavingOverride(true);
     try {
       await putSlaTier1Bounds(
@@ -426,6 +483,85 @@ export function SlaPoliciesPage({
     }
   }
 
+  async function saveGlobalChangesForAllOrgs() {
+    if (!canEdit) return toast.error("You do not have modify access for SLA settings");
+    setSavingGlobal(true);
+    try {
+      const orgs = await getExternalOrganizations().catch(() => []);
+      const targetOrgIds = Array.from(
+        new Set([1, ...orgs.map((o) => Number(o.id)).filter((id) => Number.isFinite(id) && id > 0)])
+      );
+      for (const organisation_id of targetOrgIds) {
+        const orgRows = rowsByOrg[organisation_id] ?? [];
+        const orgTier1 = policyMapByPriority(orgRows, "tier1");
+        const orgTier2 = policyMapByPriority(orgRows, "tier2");
+        const policiesPayload: Array<{
+          tier: "tier1" | "tier2";
+          priority: PriorityKey;
+          name: string;
+          first_response_mins: number;
+          resolution_mins: number;
+          warning_percent: number;
+          is_active: boolean;
+          metadata_json: string;
+        }> = [];
+        for (const p of PRIORITY_ORDER) {
+          if (canEditTier1) {
+            const existingTier1 = orgTier1[p];
+            const metadata = safeParseMeta(existingTier1?.metadata_json);
+            const metadata_json = JSON.stringify({
+              ...metadata,
+              definition: tier1DefinitionLine(globalTier1[p], p),
+              visible_to_customer: tier1CustomerVisible(globalTier1[p]),
+            });
+            policiesPayload.push({
+              tier: "tier1",
+              priority: p,
+              name: existingTier1?.name ?? `Org ${organisation_id} ${p} Tier1`,
+              first_response_mins: globalTier1Draft[p].first_response_mins,
+              resolution_mins: globalTier1Draft[p].resolution_mins,
+              warning_percent: existingTier1?.warning_percent ?? 75,
+              is_active: true,
+              metadata_json,
+            });
+          }
+          if (canEditTier2) {
+            const existingTier2 = orgTier2[p];
+            const metadata = safeParseMeta(existingTier2?.metadata_json);
+            const draft = globalTier2Draft[p];
+            const metadata_json = JSON.stringify({
+              ...metadata,
+              l2_acknowledgement_mins: draft.l2Ack,
+              l2_resolution_pass_mins: draft.l2Pass,
+              l3_acknowledgement_mins: draft.l3Ack,
+              l3_resolution_mins: draft.l3Res,
+            });
+            policiesPayload.push({
+              tier: "tier2",
+              priority: p,
+              name: existingTier2?.name ?? `Org ${organisation_id} ${p} Tier2`,
+              first_response_mins: draft.l2Ack,
+              resolution_mins: draft.l3Res,
+              warning_percent: existingTier2?.warning_percent ?? 75,
+              is_active: true,
+              metadata_json,
+            });
+          }
+        }
+        if (policiesPayload.length) {
+          await upsertSlaPoliciesBatch(organisation_id, policiesPayload);
+        }
+      }
+      toast.success("Tier 1 and Tier 2 SLA updates applied to all organizations.");
+      setGlobalEditMode(false);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save global SLA changes");
+    } finally {
+      setSavingGlobal(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-[1300px] space-y-4 pb-8">
       <div className="flex items-center justify-between gap-3">
@@ -434,6 +570,27 @@ export function SlaPoliciesPage({
           <h1 className="text-xl font-semibold text-[#111827] dark:text-slate-100">Global SLA Standards</h1>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-300">
+          {canEdit ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setGlobalEditMode((prev) => !prev)}
+                className="rounded-lg border border-black/10 bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-[#114d87] dark:border-white/15 dark:bg-white/10 dark:text-blue-200"
+              >
+                {globalEditMode ? "Cancel Edit" : "Edit Tier 1/2"}
+              </button>
+              {globalEditMode ? (
+                <button
+                  type="button"
+                  onClick={() => void saveGlobalChangesForAllOrgs()}
+                  disabled={savingGlobal}
+                  className="rounded-lg bg-[#1E88E5] px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60"
+                >
+                  {savingGlobal ? "Saving..." : "Save for All Orgs"}
+                </button>
+              ) : null}
+            </>
+          ) : null}
           <span className="inline-flex h-2 w-2 rounded-full bg-emerald-500" />
           Last Updated: {new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
         </div>
@@ -460,7 +617,7 @@ export function SlaPoliciesPage({
                   Tier 1 — Customer-facing SLA (configurable)
                 </div>
                 <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700 dark:bg-sky-500/20 dark:text-sky-300">
-                  Default global (org 1)
+                  Default global
                 </span>
               </div>
               <div className="overflow-x-auto">
@@ -486,13 +643,41 @@ export function SlaPoliciesPage({
                           {tier1DefinitionLine(globalTier1[p], p)}
                         </td>
                         <td className="py-2 pr-2">
-                          {minutesLabel(
-                            globalTier1[p]?.first_response_mins ?? TIER1_CUSTOMER_DEFAULTS[p].firstResponseMins
+                          {globalEditMode && canEditTier1 ? (
+                            <input
+                              type="number"
+                              value={globalTier1Draft[p].first_response_mins}
+                              onChange={(e) =>
+                                setGlobalTier1Draft((prev) => ({
+                                  ...prev,
+                                  [p]: { ...prev[p], first_response_mins: Number(e.target.value) },
+                                }))
+                              }
+                              className="w-24 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                            />
+                          ) : (
+                            minutesLabel(
+                              globalTier1[p]?.first_response_mins ?? TIER1_CUSTOMER_DEFAULTS[p].firstResponseMins
+                            )
                           )}
                         </td>
                         <td className="py-2 pr-2 font-semibold text-[#111827] dark:text-slate-100">
-                          {minutesLabel(
-                            globalTier1[p]?.resolution_mins ?? TIER1_CUSTOMER_DEFAULTS[p].resolutionMins
+                          {globalEditMode && canEditTier1 ? (
+                            <input
+                              type="number"
+                              value={globalTier1Draft[p].resolution_mins}
+                              onChange={(e) =>
+                                setGlobalTier1Draft((prev) => ({
+                                  ...prev,
+                                  [p]: { ...prev[p], resolution_mins: Number(e.target.value) },
+                                }))
+                              }
+                              className="w-24 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                            />
+                          ) : (
+                            minutesLabel(
+                              globalTier1[p]?.resolution_mins ?? TIER1_CUSTOMER_DEFAULTS[p].resolutionMins
+                            )
                           )}
                         </td>
                         <td className="py-2">{tier1CustomerVisible(globalTier1[p]) ? "Yes" : "No"}</td>
@@ -509,7 +694,7 @@ export function SlaPoliciesPage({
                   Tier 2 — Internal Ezii SLA (fixed targets)
                 </div>
                 <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800 dark:bg-violet-500/20 dark:text-violet-200">
-                  Non-configurable
+                  Global editable (screen access)
                 </span>
               </div>
               <div className="overflow-x-auto">
@@ -533,10 +718,74 @@ export function SlaPoliciesPage({
                               {p} — {PRIORITY_META[p].label}
                             </span>
                           </td>
-                          <td className="py-2 pr-2">{minutesLabel(t.l2Ack)}</td>
-                          <td className="py-2 pr-2">{minutesLabel(t.l2Pass)}</td>
-                          <td className="py-2 pr-2">{minutesLabel(t.l3Ack)}</td>
-                          <td className="py-2 font-semibold text-[#111827] dark:text-slate-100">{minutesLabel(t.l3Res)}</td>
+                          <td className="py-2 pr-2">
+                            {globalEditMode && canEditTier2 ? (
+                              <input
+                                type="number"
+                                value={globalTier2Draft[p].l2Ack}
+                                onChange={(e) =>
+                                  setGlobalTier2Draft((prev) => ({
+                                    ...prev,
+                                    [p]: { ...prev[p], l2Ack: Number(e.target.value) },
+                                  }))
+                                }
+                                className="w-20 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                              />
+                            ) : (
+                              minutesLabel(t.l2Ack)
+                            )}
+                          </td>
+                          <td className="py-2 pr-2">
+                            {globalEditMode && canEditTier2 ? (
+                              <input
+                                type="number"
+                                value={globalTier2Draft[p].l2Pass}
+                                onChange={(e) =>
+                                  setGlobalTier2Draft((prev) => ({
+                                    ...prev,
+                                    [p]: { ...prev[p], l2Pass: Number(e.target.value) },
+                                  }))
+                                }
+                                className="w-20 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                              />
+                            ) : (
+                              minutesLabel(t.l2Pass)
+                            )}
+                          </td>
+                          <td className="py-2 pr-2">
+                            {globalEditMode && canEditTier2 ? (
+                              <input
+                                type="number"
+                                value={globalTier2Draft[p].l3Ack}
+                                onChange={(e) =>
+                                  setGlobalTier2Draft((prev) => ({
+                                    ...prev,
+                                    [p]: { ...prev[p], l3Ack: Number(e.target.value) },
+                                  }))
+                                }
+                                className="w-20 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                              />
+                            ) : (
+                              minutesLabel(t.l3Ack)
+                            )}
+                          </td>
+                          <td className="py-2 font-semibold text-[#111827] dark:text-slate-100">
+                            {globalEditMode && canEditTier2 ? (
+                              <input
+                                type="number"
+                                value={globalTier2Draft[p].l3Res}
+                                onChange={(e) =>
+                                  setGlobalTier2Draft((prev) => ({
+                                    ...prev,
+                                    [p]: { ...prev[p], l3Res: Number(e.target.value) },
+                                  }))
+                                }
+                                className="w-20 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                              />
+                            ) : (
+                              minutesLabel(t.l3Res)
+                            )}
+                          </td>
                         </tr>
                       );
                     })}
@@ -584,49 +833,6 @@ export function SlaPoliciesPage({
             </GlassCard>
           </div>
 
-          <div className="space-y-4">
-            <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
-              <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[#111827] dark:text-slate-100">
-                <ShieldCheck className="h-4 w-4 text-[#1E88E5]" />
-                Tier 1 guardrails (org 1 template)
-              </div>
-              <p className="mb-3 text-[10px] text-slate-500 dark:text-slate-400">
-                Min/max bands apply per organization. System Admin sets them in the override editor (saved per org).
-              </p>
-              <div className="max-h-[220px] space-y-2 overflow-y-auto text-[10px]">
-                {PRIORITY_ORDER.map((p) => (
-                  <div
-                    key={p}
-                    className="rounded-lg border border-black/10 bg-white/75 p-2 dark:border-white/10 dark:bg-white/[0.04]"
-                  >
-                    <div className="font-bold text-[#1E88E5]">{p}</div>
-                    <div className="mt-0.5 flex flex-wrap justify-between gap-1 text-slate-600 dark:text-slate-300">
-                      <span>
-                        L1 first: {globalBoundsMap[p].minFirstResponseMins}–{globalBoundsMap[p].maxFirstResponseMins}m
-                      </span>
-                      <span>
-                        L1 res: {globalBoundsMap[p].minResolutionMins}–{globalBoundsMap[p].maxResolutionMins}m
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </GlassCard>
-
-            <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
-              <div className="mb-2 text-sm font-semibold text-[#111827] dark:text-slate-100">Operational Controls</div>
-              <div className="space-y-2">
-                <div className="flex items-center justify-between rounded-xl border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/[0.04]"><span>Business Hours</span><Globe className="h-3.5 w-3.5 text-slate-400" /></div>
-                <div className="flex items-center justify-between rounded-xl border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/[0.04]"><span>Holiday Calendars</span><Calendar className="h-3.5 w-3.5 text-slate-400" /></div>
-              </div>
-            </GlassCard>
-
-            <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
-              <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-500">Overall Compliance Trend</div>
-              <div className="h-[64px] rounded-lg bg-gradient-to-r from-blue-100 via-blue-200 to-blue-100 dark:from-blue-500/10 dark:via-blue-500/20 dark:to-blue-500/10" />
-              <div className="mt-2 text-xl font-semibold text-[#111827] dark:text-slate-100">98.2%</div>
-            </GlassCard>
-          </div>
         </div>
       ) : null}
 
@@ -638,14 +844,16 @@ export function SlaPoliciesPage({
                 <div className="text-base font-semibold text-[#111827] dark:text-slate-100">{editingOrgName} Override</div>
                 <button type="button" onClick={() => { setEditingOrgId(null); setBoundsDraft(null); }} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
-              <div className="grid grid-cols-1 gap-4 p-5 xl:grid-cols-[2fr_1fr]">
+              <div className="grid grid-cols-1 gap-4 p-5 xl:grid-cols-[2fr]">
                 <div className="space-y-4">
                   <div>
                     <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                       <div className="text-base font-semibold text-[#115ca8] dark:text-blue-300">Editable Tier 1 targets</div>
                       <div className="flex items-center gap-2">
                         <button type="button" onClick={resetOverrideDefaults} className="rounded-lg border border-black/10 bg-white/80 px-3 py-2 text-xs font-semibold dark:border-white/15 dark:bg-white/10">Reset to global defaults</button>
-                        <button type="button" onClick={() => void saveOverride()} disabled={savingOverride || !canEdit} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{savingOverride ? "Saving..." : "Save"}</button>
+                        <InstantTooltip disabled={!canEdit} message={modifyAccessMessage}>
+                          <button type="button" onClick={() => void saveOverride()} disabled={savingOverride || !canEdit} className="rounded-lg bg-[#1E88E5] px-4 py-2 text-xs font-semibold text-white disabled:opacity-60">{savingOverride ? "Saving..." : "Save"}</button>
+                        </InstantTooltip>
                       </div>
                     </div>
                     <div className="overflow-x-auto rounded-xl border border-black/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
@@ -758,29 +966,6 @@ export function SlaPoliciesPage({
                         </tbody>
                       </table>
                     </div>
-                  </div>
-                </div>
-                <div className="space-y-3">
-                  <div className="rounded-2xl bg-[#0D5EA8] p-4 text-white shadow-[0_10px_30px_rgba(13,94,168,0.35)]">
-                    <div className="mb-2 text-xs font-bold uppercase tracking-wide text-blue-100">Internal Ezii reference (L3 resolution floor)</div>
-                    <div className="space-y-2">
-                      {PRIORITY_ORDER.map((p) => {
-                        const t = tier2Resolved(globalTier2[p], p);
-                        return (
-                          <div key={p} className="grid grid-cols-2 gap-x-2 gap-y-1 text-[10px]">
-                            <span className="col-span-2 font-semibold">{p}</span>
-                            <span className="text-blue-100">L2 ack / pass / L3 ack</span>
-                            <span className="text-right font-mono">{minutesLabel(t.l2Ack)} / {minutesLabel(t.l2Pass)} / {minutesLabel(t.l3Ack)}</span>
-                            <span className="text-blue-100">L3 resolution</span>
-                            <span className="text-right font-semibold">{minutesLabel(t.l3Res)}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-200">
-                    <div className="mb-1 font-bold">Tip</div>
-                    Customer Tier 1 commitments must be at least as lenient as the internal L3 resolution targets (and within the org min/max bands).
                   </div>
                 </div>
               </div>
