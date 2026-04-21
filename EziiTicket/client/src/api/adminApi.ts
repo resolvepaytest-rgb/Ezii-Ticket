@@ -1150,6 +1150,35 @@ export function getAgentsTicketMetrics(organisationId: number) {
   return http<ApiResponse<AgentTicketMetricsRow[]>>(`/admin/agents/ticket-metrics?${q}`).then((r) => r.data);
 }
 
+/** Result of POST `/admin/organisations/:id/attendance-ooo-sync` (leave → `users` OOO + date range). */
+export type AttendanceOooSyncSummary = {
+  ok: boolean;
+  organisationId: number;
+  start_date: string;
+  end_date: string;
+  rowsFromApi: number;
+  updatedTrue: number;
+  updatedFalse: number;
+  unresolvedRows: number;
+  users_with_leave: number;
+  error?: string;
+};
+
+/** Calls external leave `attendance-sync` via server; updates `out_of_office` and `ooo_*` date range. */
+export function syncAttendanceOooFromLeave(
+  organisationId: number,
+  range?: { startDate: string; endDate: string }
+) {
+  const q = new URLSearchParams();
+  if (range?.startDate?.trim()) q.set("startDate", range.startDate.trim());
+  if (range?.endDate?.trim()) q.set("endDate", range.endDate.trim());
+  const qs = q.toString() ? `?${q}` : "";
+  return http<ApiResponse<AttendanceOooSyncSummary>>(
+    `/admin/organisations/${organisationId}/attendance-ooo-sync${qs}`,
+    { method: "POST" }
+  ).then((r) => r.data);
+}
+
 export function setTeamMembers(
   teamId: number,
   members: { user_id: number; is_team_lead?: boolean; max_open_tickets_cap?: number | null }[]

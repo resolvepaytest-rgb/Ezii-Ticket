@@ -266,7 +266,6 @@ function SlaCountdownCell({ row }: { row: TicketRow }) {
           <span className="ml-1 text-[10px] font-medium text-[#B91C1C]/90 dark:text-red-400/90">overdue</span>
         ) : null}
       </div>
-      <SlaBar level={isOverdue ? "critical" : level} />
     </div>
   );
 }

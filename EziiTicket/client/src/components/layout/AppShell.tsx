@@ -175,7 +175,7 @@ export function AppShell({
           />
           <div className="fixed right-6 top-[4.75rem] z-50 w-[360px] max-w-[92vw] max-h-[calc(100vh-6rem)] overflow-y-auto rounded-2xl border border-black/10 bg-background/95 p-4 shadow-xl backdrop-blur-xl dark:border-white/10">
             <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary/20 text-lg font-semibold text-primary">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-[hsl(var(--brand)/0.2)] text-lg font-semibold text-[hsl(var(--brand))]">
                 {initialText}
               </div>
               <div className="min-w-0">

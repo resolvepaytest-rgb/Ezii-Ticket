@@ -103,18 +103,23 @@ function resolveUserId(
   return null;
 }
 
-function attendanceUrl(base: string, organisationId: number, ymd: string): string {
+function attendanceUrl(base: string, organisationId: number, startYmd: string, endYmd: string): string {
   const root = base.replace(/\/+$/, "");
   const qs = new URLSearchParams({
     orgId: String(organisationId),
-    startDate: ymd,
-    endDate: ymd,
+    startDate: startYmd,
+    endDate: endYmd,
   });
   return `${root}/api/attendance-sync?${qs.toString()}`;
 }
 
-async function fetchAttendancePayload(baseUrl: string, organisationId: number, ymd: string): Promise<unknown> {
-  const url = attendanceUrl(baseUrl, organisationId, ymd);
+async function fetchAttendancePayload(
+  baseUrl: string,
+  organisationId: number,
+  startYmd: string,
+  endYmd: string
+): Promise<unknown> {
+  const url = attendanceUrl(baseUrl, organisationId, startYmd, endYmd);
   const headers: Record<string, string> = { accept: "application/json" };
   const token = env.leaveApiBearer?.trim();
   if (token) headers.authorization = `Bearer ${token}`;
@@ -132,51 +137,135 @@ async function fetchAttendancePayload(baseUrl: string, organisationId: number, y
   return (await res.json()) as unknown;
 }
 
-/**
- * Nightly job: pulls `/api/attendance-sync` from `LEAVE_BASE_URL` and updates `users.out_of_office`
- * for the configured organisation (default 1). With the leave API contract:
- * - each item in `data[]` is a leave record for a date
- * - `employee_number` identifies the user
- * - only `leave_status = approved` should become OOO=true
- * Everyone else in the organisation is set to OOO=false for that day.
- */
-export async function runAttendanceOooSync(args: { organisationId: number; ymd: string }): Promise<{
+function parseIsoYmd(v: unknown): string | null {
+  const s = String(v ?? "").trim().slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+/** Best-effort leave bounds from one API row (single-day or start/end). */
+function rowLeaveDateBounds(
+  row: Record<string, unknown>,
+  fallbackWindow?: { startDate: string; endDate: string }
+): { min: string; max: string } | null {
+  const single =
+    parseIsoYmd(row.leave_date) ??
+    parseIsoYmd(row.leaveDate) ??
+    parseIsoYmd(row.date) ??
+    parseIsoYmd(row.leave_day) ??
+    parseIsoYmd(row.attendance_date);
+  const start =
+    parseIsoYmd(row.start_date) ??
+    parseIsoYmd(row.startDate) ??
+    parseIsoYmd(row.from_date) ??
+    parseIsoYmd(row.leave_start_date) ??
+    parseIsoYmd(row.leaveStartDate) ??
+    single;
+  const end =
+    parseIsoYmd(row.end_date) ??
+    parseIsoYmd(row.endDate) ??
+    parseIsoYmd(row.to_date) ??
+    parseIsoYmd(row.leave_end_date) ??
+    parseIsoYmd(row.leaveEndDate) ??
+    start;
+  if (!start || !end) {
+    if (fallbackWindow) {
+      return {
+        min: fallbackWindow.startDate,
+        max: fallbackWindow.endDate,
+      };
+    }
+    return null;
+  }
+  const min = start <= end ? start : end;
+  const max = end >= start ? end : start;
+  return { min, max };
+}
+
+function rangeOverlapsWindow(rowMin: string, rowMax: string, winStart: string, winEnd: string): boolean {
+  return rowMax >= winStart && rowMin <= winEnd;
+}
+
+function mergeBounds(a: { min: string; max: string }, b: { min: string; max: string }): { min: string; max: string } {
+  return {
+    min: a.min < b.min ? a.min : b.min,
+    max: a.max > b.max ? a.max : b.max,
+  };
+}
+
+export type AttendanceOooSyncRunSummary = {
   ok: boolean;
   organisationId: number;
-  ymd: string;
+  start_date: string;
+  end_date: string;
   rowsFromApi: number;
+  /** Users who transitioned to out_of_office=true because today falls within synced leave range. */
   updatedTrue: number;
+  /** Users cleared to out_of_office=false (not on approved leave in this payload window). */
   updatedFalse: number;
   unresolvedRows: number;
+  /** Users with at least one resolved approved leave row overlapping the query window. */
+  users_with_leave: number;
   error?: string;
-}> {
+};
+
+/**
+ * Pulls `/api/attendance-sync` from `LEAVE_BASE_URL` for [startDate, endDate] and updates `users`:
+ * - `ooo_start_date` / `ooo_end_date`: union of approved leave bounds from matching rows
+ * - `out_of_office`: true iff server-local **today** lies within that union
+ * Users in the org with no matching leave rows: OOO cleared and date range nulled.
+ */
+export async function runAttendanceOooSync(args: {
+  organisationId: number;
+  startDate: string;
+  endDate: string;
+}): Promise<AttendanceOooSyncRunSummary> {
+  const startDate = args.startDate.trim();
+  const endDate = args.endDate.trim();
   const base = env.leaveBaseUrl?.trim();
   if (!base) {
     return {
       ok: false,
       organisationId: args.organisationId,
-      ymd: args.ymd,
+      start_date: startDate,
+      end_date: endDate,
       rowsFromApi: 0,
       updatedTrue: 0,
       updatedFalse: 0,
       unresolvedRows: 0,
+      users_with_leave: 0,
       error: "LEAVE_BASE_URL is not configured",
+    };
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(startDate) || !/^\d{4}-\d{2}-\d{2}$/.test(endDate) || startDate > endDate) {
+    return {
+      ok: false,
+      organisationId: args.organisationId,
+      start_date: startDate,
+      end_date: endDate,
+      rowsFromApi: 0,
+      updatedTrue: 0,
+      updatedFalse: 0,
+      unresolvedRows: 0,
+      users_with_leave: 0,
+      error: "Invalid startDate / endDate (expected YYYY-MM-DD, start ≤ end)",
     };
   }
 
   let payload: unknown;
   try {
-    payload = await fetchAttendancePayload(base, args.organisationId, args.ymd);
+    payload = await fetchAttendancePayload(base, args.organisationId, startDate, endDate);
   } catch (e) {
     const msg = (e as Error).message ?? String(e);
     return {
       ok: false,
       organisationId: args.organisationId,
-      ymd: args.ymd,
+      start_date: startDate,
+      end_date: endDate,
       rowsFromApi: 0,
       updatedTrue: 0,
       updatedFalse: 0,
       unresolvedRows: 0,
+      users_with_leave: 0,
       error: msg,
     };
   }
@@ -186,11 +275,13 @@ export async function runAttendanceOooSync(args: { organisationId: number; ymd: 
     return {
       ok: true,
       organisationId: args.organisationId,
-      ymd: args.ymd,
+      start_date: startDate,
+      end_date: endDate,
       rowsFromApi: 0,
       updatedTrue: 0,
       updatedFalse: 0,
       unresolvedRows: 0,
+      users_with_leave: 0,
     };
   }
 
@@ -205,7 +296,7 @@ export async function runAttendanceOooSync(args: { organisationId: number; ymd: 
   );
   const maps = buildOrgUserLookup(usersRes.rows);
 
-  const onLeaveIds = new Set<number>();
+  const rangeByUser = new Map<number, { min: string; max: string }>();
   let unresolvedRows = 0;
 
   for (const row of rows) {
@@ -214,46 +305,63 @@ export async function runAttendanceOooSync(args: { organisationId: number; ymd: 
       continue;
     }
     if (!isApprovedLeaveRow(row)) continue;
+    const bounds = rowLeaveDateBounds(row, { startDate, endDate });
+    if (!bounds) continue;
+    if (!rangeOverlapsWindow(bounds.min, bounds.max, startDate, endDate)) continue;
     const uid = resolveUserId(row, maps);
     if (uid == null) {
       unresolvedRows += 1;
       continue;
     }
-    onLeaveIds.add(uid);
+    const prev = rangeByUser.get(uid);
+    rangeByUser.set(uid, prev ? mergeBounds(prev, bounds) : bounds);
+  }
+
+  const today = ymdLocal(new Date());
+  const beforeRes = await pool.query<{ user_id: string; out_of_office: boolean }>(
+    `select user_id::text, coalesce(out_of_office, false) as out_of_office
+     from users where organisation_id = $1::bigint`,
+    [args.organisationId]
+  );
+  const beforeOoo = new Map<number, boolean>();
+  for (const r of beforeRes.rows) {
+    const uid = Number(r.user_id);
+    if (Number.isFinite(uid)) beforeOoo.set(uid, r.out_of_office === true);
   }
 
   let updatedTrue = 0;
-  let updatedFalse = 0;
   const newlyOooUserIds: number[] = [];
 
-  for (const userId of onLeaveIds) {
-    const r = await pool.query(
+  for (const [userId, bounds] of rangeByUser) {
+    const inLeaveToday = today >= bounds.min && today <= bounds.max;
+    await pool.query(
       `update users
-       set out_of_office = true,
+       set out_of_office = $3::boolean,
+           ooo_start_date = $4::date,
+           ooo_end_date = $5::date,
            updated_at = now()
-       where user_id = $1::bigint
-         and organisation_id = $2::bigint
-         and coalesce(out_of_office, false) = false
-       returning user_id`,
-      [userId, args.organisationId]
+       where user_id = $1::bigint and organisation_id = $2::bigint`,
+      [userId, args.organisationId, inLeaveToday, bounds.min, bounds.max]
     );
-    if (r.rowCount && r.rowCount > 0) {
+    if (inLeaveToday && beforeOoo.get(userId) !== true) {
       updatedTrue += 1;
       newlyOooUserIds.push(userId);
     }
   }
 
-  const keepIds = [...onLeaveIds];
+  const keepIds = [...rangeByUser.keys()];
   const clear = await pool.query(
     `update users
      set out_of_office = false,
+         ooo_start_date = null,
+         ooo_end_date = null,
          updated_at = now()
      where organisation_id = $1::bigint
-       and coalesce(out_of_office, false) = true
        and not (user_id = any($2::bigint[]))`,
     [args.organisationId, keepIds.length ? keepIds : [-1]]
   );
-  updatedFalse = clear.rowCount ?? 0;
+  const updatedFalse = clear.rowCount ?? 0;
+
   if (newlyOooUserIds.length > 0) {
     await redistributeOpenTicketsForOooUsers({
       organisationId: args.organisationId,
@@ -264,15 +372,18 @@ export async function runAttendanceOooSync(args: { organisationId: number; ymd: 
   return {
     ok: true,
     organisationId: args.organisationId,
-    ymd: args.ymd,
+    start_date: startDate,
+    end_date: endDate,
     rowsFromApi: rows.length,
     updatedTrue,
     updatedFalse,
     unresolvedRows,
+    users_with_leave: rangeByUser.size,
   };
 }
 
-function localYmd(d: Date): string {
+/** Server process local calendar date (set `TZ` if a specific region is required). */
+export function ymdLocal(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -294,11 +405,12 @@ export function scheduleAttendanceOooMidnightSync(): void {
   const tick = () => {
     const delay = msUntilNextLocalMidnight();
     setTimeout(async () => {
-      const ymd = localYmd(new Date());
+      const ymd = ymdLocal(new Date());
       try {
         const summary = await runAttendanceOooSync({
           organisationId: env.attendanceOooSyncOrgId,
-          ymd,
+          startDate: ymd,
+          endDate: ymd,
         });
         if (!summary.ok) {
           // eslint-disable-next-line no-console
@@ -306,7 +418,7 @@ export function scheduleAttendanceOooMidnightSync(): void {
         } else {
           // eslint-disable-next-line no-console
           console.log(
-            `[attendance-ooo] org=${summary.organisationId} date=${summary.ymd} api_rows=${summary.rowsFromApi} -> ooo_true=${summary.updatedTrue} cleared=${summary.updatedFalse} unmatched=${summary.unresolvedRows}`
+            `[attendance-ooo] org=${summary.organisationId} range=${summary.start_date}..${summary.end_date} api_rows=${summary.rowsFromApi} -> new_ooo_today=${summary.updatedTrue} cleared=${summary.updatedFalse} leave_users=${summary.users_with_leave} unmatched=${summary.unresolvedRows}`
           );
         }
       } catch (err) {

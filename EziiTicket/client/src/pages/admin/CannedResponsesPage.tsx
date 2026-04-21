@@ -254,7 +254,7 @@ export function CannedResponsesPage({ orgId }: { orgId: string }) {
                 </thead>
                 <tbody>
                   {visibleRows.map((r) => {
-                    const usage = ((r.id * 73) % 600) + 40;
+                    const usage = (r.id);
                     const audienceLabel =
                       r.audience === "all"
                         ? "General"

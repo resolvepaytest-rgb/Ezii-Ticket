@@ -10,7 +10,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { EZII_BRAND } from "@/lib/eziiBrand";
 import { useUIStore } from "@store/useUIStore";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -339,10 +338,9 @@ export function Header({
                 onClick={onUserPanelToggle}
                 title={userLabel}
                 className={cn(
-                  "ml-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold text-white shadow-sm ring-2 ring-white dark:ring-background",
-                  isUserPanelOpen && "ring-[#1E88E5]/50"
+                  "ml-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--brand))] text-xs font-bold text-white shadow-sm ring-2 ring-white dark:ring-background",
+                  isUserPanelOpen && "ring-[hsl(var(--brand)/0.5)]"
                 )}
-                style={{ background: EZII_BRAND.primary }}
                 aria-expanded={isUserPanelOpen}
                 aria-haspopup="dialog"
               >
@@ -405,7 +403,7 @@ export function Header({
                   onClick={onUserPanelToggle}
                   className="flex items-center gap-2 rounded-lg border border-black/10 bg-white/5 px-3 py-2 text-sm hover:bg-white/10 dark:border-white/10"
                 >
-                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary/25 text-xs font-semibold text-primary ring-1 ring-black/10 dark:ring-white/10">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-full bg-[hsl(var(--brand)/0.25)] text-xs font-semibold text-[hsl(var(--brand))] ring-1 ring-black/10 dark:ring-white/10">
                     {initialText}
                   </div>
                   <span className="hidden max-w-[220px] truncate sm:inline">

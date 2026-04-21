@@ -313,6 +313,15 @@ export function registerAdminRoutes(router: Router) {
     return mod.getAgentsTicketMetrics(req, res);
   });
 
+  router.post(
+    "/admin/organisations/:id/attendance-ooo-sync",
+    ...adminWrite("agent"),
+    async (req, res) => {
+      const mod = await import("../controllers/admin/attendanceOooSync.controller.js");
+      return mod.postAttendanceOooSync(req, res);
+    }
+  );
+
   // Queues
   router.get("/admin/queues", ...adminRead("teams_queues"), async (req, res) => {
     const mod = await import("../controllers/admin/queues.controller.js");

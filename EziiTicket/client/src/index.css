@@ -39,7 +39,7 @@
     Brand tokens (centralized)
     Set via: document.documentElement.dataset.brand = "ezii" | "resolve" | "client" | "ngo"
     Ezii palette: Primary #1E88E5, Secondary #475569, Tertiary #CC6C00, Neutral #F8FAFC
-    Resolve: #4F8EF7 | Client: #FB9745 | NGO: deep teal / forest accent
+    Resolve: #4F8EF7 | Client: #FB9745 | NGO: #FB9745 (same accent as client)
   */
   :root,
   :root[data-brand="ezii"] {
@@ -67,9 +67,9 @@
   }
 
   :root[data-brand="ngo"] {
-    /* Distinct from default Ezii blue — NGO tenant accent */
-    --brand: 158 64% 32%;
-    --brand-2: 152 55% 42%;
+    /* #FB9745 — matches client accent when org is NGO */
+    --brand: 27 96% 63%;
+    --brand-2: 48 96% 53%;
     --primary: var(--brand);
   }
 

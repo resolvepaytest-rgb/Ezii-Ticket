@@ -621,30 +621,66 @@ function OrgAdminDashboard({
     if (counts.size === 0 && fromQueues.length > 0) {
       return fromQueues.slice(0, 8).map((x) => ({
         label: x.product_name.toUpperCase().slice(0, 12),
-        value: Math.max(1, x.queue_count * 3),
+        value: Math.max(0, x.queue_count),
       }));
     }
     const arr = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-    if (arr.length === 0) {
-      return [
-        { label: "PAYROLL", value: 8 },
-        { label: "LEAVE", value: 6 },
-        { label: "IT", value: 12 },
-        { label: "HR", value: 5 },
-        { label: "ADMIN", value: 4 },
-      ];
-    }
     return arr.map(([label, value]) => ({ label: label.toUpperCase().slice(0, 12), value }));
   }, [activeTickets, productNameById, queueLoad?.by_product]);
 
-  const maxVol = useMemo(() => Math.max(1, ...volumeByProduct.map((x) => x.value)), [volumeByProduct]);
+  const maxVol = useMemo(
+    () => Math.max(1, ...volumeByProduct.filter((x) => x.value > 0).map((x) => x.value)),
+    [volumeByProduct]
+  );
 
-  const csatSeries = useMemo(() => {
-    const base = slaCompliancePct != null ? Math.min(5, 3.5 + (slaCompliancePct / 100) * 1.2) : 4.6;
-    return [base - 0.35, base - 0.2, base - 0.08, base].map((x) => Math.round(x * 10) / 10);
-  }, [slaCompliancePct]);
+  const terminalStatuses = useMemo(() => new Set(["resolved", "closed", "cancelled"]), []);
 
-  const csatAvg = csatSeries[3] ?? 4.8;
+  const resolvedCountsByWeek = useMemo(() => {
+    const now = Date.now();
+    const weekMs = 7 * 24 * 60 * 60 * 1000;
+    const buckets = [0, 0, 0, 0];
+    for (const t of tickets) {
+      const st = String(t.status).toLowerCase();
+      if (!terminalStatuses.has(st)) continue;
+      const updated = new Date(t.updated_at).getTime();
+      if (!Number.isFinite(updated)) continue;
+      const delta = now - updated;
+      if (delta < 0 || delta >= 4 * weekMs) continue;
+      const idx = 3 - Math.floor(delta / weekMs);
+      if (idx >= 0 && idx < 4) buckets[idx] += 1;
+    }
+    return buckets;
+  }, [terminalStatuses, tickets]);
+
+  const resolved30d = useMemo(() => resolvedCountsByWeek.reduce((sum, n) => sum + n, 0), [resolvedCountsByWeek]);
+
+  const resolvedPrev30d = useMemo(() => {
+    const now = Date.now();
+    const d30 = 30 * 24 * 60 * 60 * 1000;
+    let count = 0;
+    for (const t of tickets) {
+      const st = String(t.status).toLowerCase();
+      if (!terminalStatuses.has(st)) continue;
+      const updated = new Date(t.updated_at).getTime();
+      if (!Number.isFinite(updated)) continue;
+      if (updated >= now - 2 * d30 && updated < now - d30) count += 1;
+    }
+    return count;
+  }, [terminalStatuses, tickets]);
+
+  const resolvedTrendText = useMemo(() => {
+    if (resolvedPrev30d === 0 && resolved30d === 0) return "No prior period data";
+    if (resolvedPrev30d === 0) return "+100% vs prior month";
+    const pct = Math.round(((resolved30d - resolvedPrev30d) / resolvedPrev30d) * 100);
+    const sign = pct >= 0 ? "+" : "";
+    return `${sign}${pct}% vs last month`;
+  }, [resolved30d, resolvedPrev30d]);
+
+  const closedRatePct = useMemo(() => {
+    const terminalCount = tickets.filter((t) => terminalStatuses.has(String(t.status).toLowerCase())).length;
+    if (tickets.length === 0) return null;
+    return (terminalCount / tickets.length) * 100;
+  }, [terminalStatuses, tickets]);
 
   const priorityRows = useMemo(() => {
     const p12 = activeTickets.filter((t) => t.priority === "P1" || t.priority === "P2");
@@ -661,7 +697,7 @@ function OrgAdminDashboard({
     const w = 280;
     const h = 120;
     const pad = 16;
-    const vals = csatSeries;
+    const vals = resolvedCountsByWeek;
     const min = Math.min(...vals) - 0.1;
     const max = Math.max(...vals) + 0.1;
     const range = max - min || 1;
@@ -670,7 +706,7 @@ function OrgAdminDashboard({
       const y = h - pad - ((v - min) / range) * (h - 2 * pad);
       return { x, y };
     });
-  }, [csatSeries]);
+  }, [resolvedCountsByWeek]);
 
   const linePathD = useMemo(() => {
     if (linePoints.length === 0) return "";
@@ -678,6 +714,24 @@ function OrgAdminDashboard({
   }, [linePoints]);
 
   const chartGradId = useId().replace(/:/g, "");
+  const overdueSlaCount = useMemo(() => {
+    let n = 0;
+    for (const t of activeTickets) {
+      const due = nextSlaDeadline(t);
+      if (!due) continue;
+      if (new Date(due).getTime() < nowMs) n += 1;
+    }
+    return n;
+  }, [activeTickets, nowMs]);
+  const highPriorityActiveCount = useMemo(
+    () => activeTickets.filter((t) => t.priority === "P1" || t.priority === "P2").length,
+    [activeTickets]
+  );
+  const serviceHealthTitle = overdueSlaCount > 0 ? "Attention Required" : "Platform Healthy";
+  const serviceHealthTone = overdueSlaCount > 0 ? "SLA breaches detected in active queues." : "No overdue SLAs in active queues.";
+  const topProduct = volumeByProduct[0];
+  const hasVolumeData = volumeByProduct.length > 0 && volumeByProduct.some((x) => x.value > 0);
+  const hasResolvedTrendData = resolvedCountsByWeek.some((x) => x > 0);
 
   return (
     <div className="min-h-full text-[13px]">
@@ -759,11 +813,11 @@ function OrgAdminDashboard({
               </div>
               <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Feedback</span>
             </div>
-            <div className="mt-4 text-xs font-medium text-muted-foreground">CSAT 30-day Avg</div>
-            <div className="mt-1 text-2xl font-bold tabular-nums text-foreground">{csatAvg.toFixed(1)}/5</div>
+            <div className="mt-4 text-xs font-medium text-muted-foreground">Resolved Tickets (30d)</div>
+            <div className="mt-1 text-2xl font-bold tabular-nums text-foreground">{resolved30d}</div>
             <div className="mt-3 flex items-center gap-1.5 text-xs font-medium text-[hsl(var(--brand))]">
               <ThumbsUp className="h-3.5 w-3.5" />
-              High satisfaction
+              {resolvedTrendText}
             </div>
           </GlassCard>
         </div>
@@ -777,79 +831,108 @@ function OrgAdminDashboard({
                 Last 30 days
               </span>
             </div>
-            <div className="flex h-[180px] items-end justify-between gap-2 border-b border-border pb-1 pt-2">
-              {volumeByProduct.map((row) => (
-                <div key={row.label} className="flex flex-1 flex-col items-center gap-2">
-                  <div
-                    className="w-full max-w-[48px] rounded-t-md bg-gradient-to-b from-[hsl(var(--brand))] to-[hsl(var(--brand-2))] transition-all dark:from-[hsl(var(--brand)/0.95)] dark:to-[hsl(var(--brand-2)/0.85)]"
-                    style={{ height: `${Math.max(8, (row.value / maxVol) * 140)}px` }}
-                  />
-                  <span className="text-center text-[10px] font-semibold uppercase leading-tight text-muted-foreground">
-                    {row.label}
-                  </span>
+            {hasVolumeData ? (
+              <div className="flex h-[180px] gap-2 pt-2">
+                <div className="flex h-full w-10 flex-col justify-between pb-7 pr-1 text-right text-[10px] font-semibold text-muted-foreground">
+                  <span>{maxVol}</span>
+                  <span>{Math.round(maxVol * 0.75)}</span>
+                  <span>{Math.round(maxVol * 0.5)}</span>
+                  <span>{Math.round(maxVol * 0.25)}</span>
+                  <span>0</span>
                 </div>
-              ))}
-            </div>
+                <div className="relative flex min-w-0 flex-1 items-end justify-between gap-2 border-b border-border pb-1">
+                  <div className="pointer-events-none absolute inset-0 bottom-7">
+                    <div className="h-[25%] border-t border-border/60" />
+                    <div className="h-[25%] border-t border-border/50" />
+                    <div className="h-[25%] border-t border-border/40" />
+                    <div className="h-[25%] border-t border-border/35" />
+                  </div>
+                  {volumeByProduct.map((row) => (
+                    <div key={row.label} className="relative z-[1] flex flex-1 flex-col items-center gap-2">
+                      <div
+                        className="w-full max-w-[48px] rounded-t-md bg-gradient-to-b from-[hsl(var(--brand))] to-[hsl(var(--brand-2))] transition-all dark:from-[hsl(var(--brand)/0.95)] dark:to-[hsl(var(--brand-2)/0.85)]"
+                        style={{ height: `${Math.max(8, (row.value / maxVol) * 140)}px` }}
+                      />
+                      <span className="text-center text-[10px] font-semibold uppercase leading-tight text-muted-foreground">
+                        {row.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-xs font-medium text-muted-foreground">
+                No product volume data available.
+              </div>
+            )}
           </GlassCard>
 
           <GlassCard className="p-4 lg:col-span-4">
             <div className="mb-4 flex items-center justify-between gap-2">
-              <h2 className="text-sm font-semibold text-foreground">CSAT Trend</h2>
+              <h2 className="text-sm font-semibold text-foreground">Resolved Tickets Trend</h2>
               <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Week over week
               </span>
             </div>
-            <svg viewBox="0 0 280 120" className="h-[160px] w-full text-[hsl(var(--brand))]">
-              <defs>
-                <linearGradient id={`csatFill-${chartGradId}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="hsl(var(--brand))" stopOpacity={0.22} />
-                  <stop offset="100%" stopColor="hsl(var(--brand))" stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              {linePoints.length > 1 ? (
-                <path
-                  d={`${linePathD} L ${linePoints[linePoints.length - 1]!.x} 104 L ${linePoints[0]!.x} 104 Z`}
-                  fill={`url(#csatFill-${chartGradId})`}
-                />
-              ) : null}
-              <path d={linePathD} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-              {linePoints.map((p, i) => (
-                <circle
-                  key={i}
-                  cx={p.x}
-                  cy={p.y}
-                  r="4"
-                  fill="hsl(var(--card))"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                />
-              ))}
-            </svg>
-            <div className="mt-2 flex justify-between px-1 text-xs font-medium text-muted-foreground">
-              <span>W1</span>
-              <span>W2</span>
-              <span>W3</span>
-              <span>W4</span>
-            </div>
+            {hasResolvedTrendData ? (
+              <>
+                <svg viewBox="0 0 280 120" className="h-[160px] w-full text-[hsl(var(--brand))]">
+                  <defs>
+                    <linearGradient id={`csatFill-${chartGradId}`} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="hsl(var(--brand))" stopOpacity={0.22} />
+                      <stop offset="100%" stopColor="hsl(var(--brand))" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  {linePoints.length > 1 ? (
+                    <path
+                      d={`${linePathD} L ${linePoints[linePoints.length - 1]!.x} 104 L ${linePoints[0]!.x} 104 Z`}
+                      fill={`url(#csatFill-${chartGradId})`}
+                    />
+                  ) : null}
+                  <path d={linePathD} fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+                  {linePoints.map((p, i) => (
+                    <circle
+                      key={i}
+                      cx={p.x}
+                      cy={p.y}
+                      r="4"
+                      fill="hsl(var(--card))"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                    />
+                  ))}
+                </svg>
+                <div className="mt-2 flex justify-between px-1 text-xs font-medium text-muted-foreground">
+                  <span>W1</span>
+                  <span>W2</span>
+                  <span>W3</span>
+                  <span>W4</span>
+                </div>
+              </>
+            ) : (
+              <div className="flex h-[180px] items-center justify-center rounded-md border border-dashed border-border text-xs font-medium text-muted-foreground">
+                No trend data available.
+              </div>
+            )}
           </GlassCard>
 
           <GlassCard className="flex flex-col justify-between border-0 bg-gradient-to-br from-[hsl(var(--brand))] to-[hsl(var(--brand-2))] p-4 text-white shadow-lg dark:from-[hsl(var(--brand)/0.92)] dark:to-[hsl(var(--brand-2)/0.88)] dark:shadow-black/40 lg:col-span-4">
             <div>
               <Signal className="h-5 w-5 opacity-90" />
               <p className="mt-3 text-[10px] font-bold uppercase tracking-widest opacity-90">Service status</p>
-              <h3 className="mt-2 text-lg font-bold">Platform Active</h3>
-              <p className="mt-2 text-xs leading-relaxed opacity-95">
-                Ezii platform is running at full capacity. All core services are operational for your organisation.
-              </p>
+              <h3 className="mt-2 text-lg font-bold">{serviceHealthTitle}</h3>
+              <p className="mt-2 text-xs leading-relaxed opacity-95">{serviceHealthTone}</p>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 border-t border-white/25 pt-3">
               <div>
                 <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">Avg uptime</div>
-                <div className="mt-1 text-base font-semibold tabular-nums">99.98%</div>
+                <div className="mt-1 text-base font-semibold tabular-nums">
+                  {closedRatePct != null ? `${closedRatePct.toFixed(1)}%` : "—"}
+                </div>
               </div>
               <div>
-                <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">Response</div>
-                <div className="mt-1 text-base font-semibold tabular-nums">120ms</div>
+                <div className="text-[10px] font-bold uppercase tracking-wider opacity-80">P1/P2 Active</div>
+                <div className="mt-1 text-base font-semibold tabular-nums">{highPriorityActiveCount}</div>
               </div>
             </div>
           </GlassCard>
@@ -903,7 +986,9 @@ function OrgAdminDashboard({
                           <td className="px-5 py-3.5 font-semibold text-foreground">#{row.ticket_code}</td>
                           <td className="max-w-[220px] px-3 py-3.5">
                             <div className="line-clamp-1 font-semibold text-foreground">{row.subject}</div>
-                            <div className="line-clamp-1 text-xs text-muted-foreground">Updated recently</div>
+                            <div className="line-clamp-1 text-xs text-muted-foreground">
+                              Updated {new Date(row.updated_at).toLocaleDateString()}
+                            </div>
                           </td>
                           <td className="px-3 py-3.5">
                             <span
@@ -943,33 +1028,28 @@ function OrgAdminDashboard({
           <div className="lg:col-span-4">
             <div className="mb-3 flex items-center gap-2">
               <Megaphone className="h-5 w-5 text-foreground/80" />
-              <h2 className="text-sm font-semibold text-foreground">Announcements</h2>
+              <h2 className="text-sm font-semibold text-foreground">Operational Highlights</h2>
             </div>
             <div className="space-y-3">
               <GlassCard className="overflow-hidden p-0">
                 <div className="border-l-4 border-orange-500 py-3 pl-3.5 pr-3.5 dark:border-orange-400">
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">
-                    Maintenance
-                  </div>
-                  <div className="mt-1 font-semibold text-foreground">Scheduled Update</div>
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-orange-600 dark:text-orange-400">SLA</div>
+                  <div className="mt-1 font-semibold text-foreground">{overdueSlaCount} overdue ticket(s)</div>
                   <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                     <Calendar className="h-3.5 w-3.5 shrink-0" />
-                    <span>Sunday 02:00–04:00 IST</span>
+                    <span>Near-breach queues need immediate review</span>
                   </div>
                 </div>
               </GlassCard>
               <GlassCard className="overflow-hidden p-0">
                 <div className="border-l-4 border-[hsl(var(--brand))] py-3 pl-3.5 pr-3.5">
-                  <div className="text-[10px] font-bold uppercase tracking-wide text-[hsl(var(--brand))]">
-                    Feature release
+                  <div className="text-[10px] font-bold uppercase tracking-wide text-[hsl(var(--brand))]">Volume</div>
+                  <div className="mt-1 font-semibold text-foreground">
+                    {topProduct ? `${topProduct.label} has the highest queue load` : "No active ticket volume yet"}
                   </div>
-                  <div className="mt-1 font-semibold text-foreground">AI Smart Tagging</div>
-                  <button
-                    type="button"
-                    className="mt-3 text-xs font-semibold text-[hsl(var(--brand))] hover:underline"
-                  >
-                    Read release notes
-                  </button>
+                  <div className="mt-3 text-xs font-semibold text-[hsl(var(--brand))]">
+                    {topProduct ? `${topProduct.value} active ticket(s)` : "Awaiting ticket data"}
+                  </div>
                 </div>
               </GlassCard>
             </div>

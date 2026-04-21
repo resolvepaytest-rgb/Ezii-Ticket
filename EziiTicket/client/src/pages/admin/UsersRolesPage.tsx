@@ -919,35 +919,30 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
       rowRoleMap[row.user_id] ??
       assignedRoleIdByUserId[row.user_id] ??
       null;
-    const persistedLevel = tierKeyFromUserDesignation(assignedDesignationByUserId[row.user_id]);
-    const selectedLevel =
-      rowLevelMap[row.user_id] !== undefined ? rowLevelMap[row.user_id] ?? "" : persistedLevel;
 
-    if (selectedRoleId == null && !selectedLevel) {
-      toast.error("Select a role or level first.");
+    if (selectedRoleId == null) {
+      toast.error("Select a role first.");
       return;
     }
 
-    if (selectedRoleId != null) {
-      const nextRoleMap: Record<number, number | null> = {};
-      for (const targetRow of visibleRows) {
-        nextRoleMap[targetRow.user_id] = selectedRoleId;
-      }
-      setRowRoleMap((prev) => ({ ...prev, ...nextRoleMap }));
-    }
+    /** Tenant org: customer directory vs Ezii-invited rows are separate sections — bulk role only within the same section. */
+    const cohortRows =
+      splitTenantUserSections
+        ? visibleRows.filter((r) => isEziiInvitedSectionRow(r) === isEziiInvitedSectionRow(row))
+        : visibleRows;
 
-    const nextLevelMap: Record<number, string | undefined> = {};
-    if (selectedLevel) {
-      for (const targetRow of visibleRows) {
-        const canEditTargetLevel =
-          activeOrgId == null || activeOrgId === 1 ? true : isEziiInvitedSectionRow(targetRow);
-        if (!canEditTargetLevel) continue;
-        nextLevelMap[targetRow.user_id] = selectedLevel;
-      }
-      setRowLevelMap((prev) => ({ ...prev, ...nextLevelMap }));
+    const nextRoleMap: Record<number, number | null> = {};
+    for (const targetRow of cohortRows) {
+      nextRoleMap[targetRow.user_id] = selectedRoleId;
     }
+    setRowRoleMap((prev) => ({ ...prev, ...nextRoleMap }));
 
-    toast.success("Copied selected role/level to all users. Click Apply Changes to save.");
+    const scopePhrase = !splitTenantUserSections
+      ? "all users"
+      : isEziiInvitedSectionRow(row)
+        ? "all Ezii-invited users"
+        : "all customer users";
+    toast.success(`Copied selected role to ${scopePhrase}. Click Apply Changes to save.`);
   }
 
   function sectionHeadingRow(

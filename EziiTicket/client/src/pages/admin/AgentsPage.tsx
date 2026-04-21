@@ -8,6 +8,7 @@ import {
   getUserDesignation,
   getAgentsTicketMetrics,
   getExternalOrganizations,
+  syncAttendanceOooFromLeave,
   listDesignations,
   listOrganisationUserDirectory,
   listRoles,
@@ -39,6 +40,7 @@ import {
   ChevronRight,
   ChevronUp,
   Filter,
+  RefreshCw,
   Search,
   Star,
   UserPlus,
@@ -186,7 +188,7 @@ export function AgentsPage({ orgId }: { orgId: string }) {
   const [tierFilter, setTierFilter] = useState<TierFilter>("all");
   const [productFilter, setProductFilter] = useState<string | "all">("all");
   const [agentSearch, setAgentSearch] = useState("");
-  const [statusFilter] = useState<StatusFilter>("all");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<number | "all">(10);
   const [listVersion, setListVersion] = useState(0);
@@ -195,6 +197,7 @@ export function AgentsPage({ orgId }: { orgId: string }) {
   const [oooDraftByUserId, setOooDraftByUserId] = useState<Record<number, { start: string; end: string }>>({});
   const [expandedOooRanges, setExpandedOooRanges] = useState<Set<number>>(new Set());
   const [expandedWorkloads, setExpandedWorkloads] = useState<Set<number>>(new Set());
+  const [oooSyncBusy, setOooSyncBusy] = useState(false);
   const [invite, setInvite] = useState<InviteState>({
     open: false,
     query: "",
@@ -407,6 +410,22 @@ export function AgentsPage({ orgId }: { orgId: string }) {
       toast.error("Failed to update out of office");
     } finally {
       setOooBusyId(null);
+    }
+  };
+
+  const handleSyncAttendanceOoo = async () => {
+    if (!activeOrgId || oooSyncBusy) return;
+    setOooSyncBusy(true);
+    try {
+      const summary = await syncAttendanceOooFromLeave(activeOrgId);
+      toast.success(
+        `Leave sync (${summary.start_date} → ${summary.end_date}): ${summary.users_with_leave} user(s) with leave, ${summary.updatedTrue} newly OOO today, ${summary.updatedFalse} cleared, ${summary.rowsFromApi} API row(s).`
+      );
+      setListVersion((v) => v + 1);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Attendance OOO sync failed");
+    } finally {
+      setOooSyncBusy(false);
     }
   };
 
@@ -784,7 +803,25 @@ export function AgentsPage({ orgId }: { orgId: string }) {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <InstantTooltip
+            disabled={!canModify}
+            message={
+              canModify
+                ? "Sync approved leave from attendance API and refresh OOO status/date range."
+                : modifyAccessMessage
+            }
+          >
+            <button
+              type="button"
+              disabled={!canModify || !activeOrgId || oooSyncBusy}
+              onClick={() => void handleSyncAttendanceOoo()}
+              className="inline-flex items-center gap-1 rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-white disabled:cursor-not-allowed disabled:opacity-50 dark:border-white/15 dark:bg-white/10 dark:text-slate-200 dark:hover:bg-white/[0.14]"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${oooSyncBusy ? "animate-spin" : ""}`} />
+              {oooSyncBusy ? "Syncing…" : "Sync leave"}
+            </button>
+          </InstantTooltip>
           <label className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
             <Search className="h-3.5 w-3.5" />
             <input
@@ -813,7 +850,20 @@ export function AgentsPage({ orgId }: { orgId: string }) {
               ))}
             </select>
           </label>
-          
+          <label className="inline-flex items-center gap-1.5 rounded-xl border border-black/10 bg-white/80 px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 dark:border-white/15 dark:bg-white/10 dark:text-slate-200">
+            <Activity className="h-3.5 w-3.5" />
+            Status:
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              className="bg-transparent outline-none"
+            >
+              <option value="all">All</option>
+              <option value="online">Online</option>
+              <option value="offline">Offline</option>
+            </select>
+          </label>
+
         </div>
       </div>
 
