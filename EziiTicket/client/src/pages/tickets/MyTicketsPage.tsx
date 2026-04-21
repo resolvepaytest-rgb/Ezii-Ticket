@@ -174,25 +174,6 @@ function pickNextSlaDeadline(row: TicketRow): string | null {
   return new Date(a).getTime() <= new Date(b).getTime() ? a : b;
 }
 
-/** Matches SystemTicketsPage `SlaBar` levels/colors. */
-function SlaBar({ level }: { level: "critical" | "warning" | "normal" | "none" }) {
-  const width =
-    level === "critical" ? "78%" : level === "warning" ? "55%" : level === "normal" ? "35%" : "0%";
-  const color =
-    level === "critical"
-      ? "#C81E1E"
-      : level === "warning"
-        ? "#CC6C00"
-        : level === "normal"
-          ? "#1E88E5"
-          : "#CBD5E1";
-
-  return (
-    <div className="h-1.5 w-full max-w-[95px] rounded-full bg-slate-200 dark:bg-slate-700/60">
-      <div className="h-full rounded-full transition-all duration-700" style={{ width, backgroundColor: color }} />
-    </div>
-  );
-}
 
 function useSlaCountdown(deadlineIso: string | null, status: string) {
   const terminal = ["resolved", "closed", "cancelled"].includes(status.toLowerCase());
