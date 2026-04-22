@@ -176,7 +176,15 @@ export async function createRole(req: Request, res: Response) {
   await ensureTenantAndDefaultsByOrgId(orgId);
   const hasCreatedAt = await rolesHasCreatedAtColumn();
   const createdAtExpr = rolesCreatedAtSelectExpr(hasCreatedAt);
-  const apply = parseApplyRolePayload(req.body as Record<string, unknown>);
+  const roleBody = (req.body ?? {}) as Record<string, unknown>;
+  const inferredApplyRoleTo = orgId === 1 ? "internal_support" : "customer_org";
+  const requestedApplyRoleTo =
+    typeof roleBody.apply_role_to === "string" ? roleBody.apply_role_to.trim() : "";
+  const normalizedApplyBody: Record<string, unknown> =
+    requestedApplyRoleTo && requestedApplyRoleTo !== "all"
+      ? roleBody
+      : { ...roleBody, apply_role_to: inferredApplyRoleTo };
+  const apply = parseApplyRolePayload(normalizedApplyBody);
   if ("error" in apply) return res.status(400).json({ ok: false, error: apply.error });
   const rolePermissionsStr = JSON.stringify(rolePermissions);
   const result = await pool.query(

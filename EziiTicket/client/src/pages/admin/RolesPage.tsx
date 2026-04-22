@@ -265,6 +265,8 @@ const DEFAULT_ROLE_BASELINES: Record<string, RolePermissions> = {
   },
 };
 
+const CUSTOMER_ORG_DEFAULT_ROLE_KEYS = new Set(["customer", "org admin"]);
+
 function normalizeRoleNameKey(name: string) {
   return name.trim().toLowerCase().replace(/\s+/g, " ");
 }
@@ -397,7 +399,20 @@ export function RolesPage() {
   );
 
   const visibleRoles = useMemo(() => roles.filter((r) => !isLegacyAgentLevelRole(r.name)), [roles]);
-  const defaultRoles = useMemo(() => visibleRoles.filter((r) => r.is_default), [visibleRoles]);
+  const activeOrgId = useMemo(() => {
+    if (isOrgScopedAdmin && Number.isFinite(authOrgIdNum) && authOrgIdNum > 0) return Math.trunc(authOrgIdNum);
+    if (selectedOrgFilter && Number.isFinite(Number(selectedOrgFilter))) return Number(selectedOrgFilter);
+    return null;
+  }, [isOrgScopedAdmin, authOrgIdNum, selectedOrgFilter]);
+  const defaultRoles = useMemo(() => {
+    const defaults = visibleRoles.filter((r) => r.is_default);
+    if (activeOrgId == null) return defaults;
+    const needsCustomerDefaults = activeOrgId !== 1;
+    return defaults.filter((r) => {
+      const isCustomerDefault = CUSTOMER_ORG_DEFAULT_ROLE_KEYS.has(baselineRoleKey(r.name));
+      return needsCustomerDefaults ? isCustomerDefault : !isCustomerDefault;
+    });
+  }, [visibleRoles, activeOrgId]);
   const customRoles = useMemo(() => visibleRoles.filter((r) => !r.is_default), [visibleRoles]);
   const filteredCustomRoles = useMemo(() => {
     if (!selectedOrgFilter) return customRoles;
@@ -804,6 +819,13 @@ export function RolesPage() {
                   const rp = permissionsSafe(role.permissions_json);
                   const counts = permissionCounts(rp);
                   const isYourRole = yourRoleKey != null && baselineRoleKey(role.name) === yourRoleKey;
+                  const roleType: "internal_support" | "customer_org" = role.is_default
+                    ? CUSTOMER_ORG_DEFAULT_ROLE_KEYS.has(baselineRoleKey(role.name))
+                      ? "customer_org"
+                      : "internal_support"
+                    : roleOrgId(role) === 1
+                    ? "internal_support"
+                    : "customer_org";
                   return (
                     <tr
                       key={role.id}
@@ -820,16 +842,28 @@ export function RolesPage() {
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        <span
-                          className={cn(
-                            "rounded-full px-2 py-1 text-[11px] font-semibold",
-                            role.is_default
-                              ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
-                              : "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
-                          )}
-                        >
-                          {role.is_default ? "Default" : "Custom"}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-1 text-[11px] font-semibold",
+                              roleType === "internal_support"
+                                ? "bg-[#1E88E5]/15 text-[#1E88E5]"
+                                : "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300"
+                            )}
+                          >
+                            {roleType === "internal_support" ? "Internal Support" : "Customer Org"}
+                          </span>
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-1 text-[11px] font-semibold",
+                              role.is_default
+                                ? "bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-200"
+                                : "bg-violet-100 text-violet-700 dark:bg-violet-500/20 dark:text-violet-300"
+                            )}
+                          >
+                            {role.is_default ? "Default" : "Custom"}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-3 py-3">
                         <div className="flex flex-wrap items-center gap-1.5">

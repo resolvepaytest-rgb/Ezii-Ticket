@@ -24,6 +24,69 @@ function normPriority(p: unknown): PriorityKey {
   return "P3";
 }
 
+function safeParseJsonObject(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === "object") return (value as Record<string, unknown>) ?? {};
+  if (typeof value !== "string") return {};
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === "object" && parsed !== null ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
+
+function numberFromMeta(meta: Record<string, unknown>, key: string, fallback: number): number {
+  const v = meta[key];
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
+async function resolveTier2GlobalBounds(priority: PriorityKey) {
+  const r = await pool.query(
+    `select first_response_mins, resolution_mins, metadata_json
+     from sla_policies
+     where organisation_id = $1::bigint and tier = 'tier2' and priority = $2
+     order by id desc
+     limit 1`,
+    [GLOBAL_SLA_ORG_ID, priority]
+  );
+  const row = r.rows[0];
+  const base = TIER2_BASELINE_BY_PRIORITY[priority];
+  const meta = safeParseJsonObject(row?.metadata_json);
+  const l2AckBase = row ? Number(row.first_response_mins) : base.firstResponseMins;
+  const l3ResBase = row ? Number(row.resolution_mins) : base.resolutionMins;
+  const l2PassBase = numberFromMeta(meta, "l2_resolution_pass_mins", l3ResBase);
+  const l3AckBase = numberFromMeta(meta, "l3_acknowledgement_mins", l2AckBase);
+  return {
+    minL2Ack: numberFromMeta(meta, "min_l2_ack_mins", l2AckBase),
+    maxL2Ack: numberFromMeta(meta, "max_l2_ack_mins", l2AckBase),
+    minL2Pass: numberFromMeta(meta, "min_l2_pass_mins", l2PassBase),
+    maxL2Pass: numberFromMeta(meta, "max_l2_pass_mins", l2PassBase),
+    minL3Ack: numberFromMeta(meta, "min_l3_ack_mins", l3AckBase),
+    maxL3Ack: numberFromMeta(meta, "max_l3_ack_mins", l3AckBase),
+    minL3Res: numberFromMeta(meta, "min_l3_res_mins", l3ResBase),
+    maxL3Res: numberFromMeta(meta, "max_l3_res_mins", l3ResBase),
+  };
+}
+
+async function validateTier2Bounds(
+  priority: PriorityKey,
+  firstResponseMins: number,
+  resolutionMins: number,
+  metadata: Record<string, unknown>
+): Promise<string | null> {
+  const b = await resolveTier2GlobalBounds(priority);
+  const l2Ack = firstResponseMins;
+  const l2Pass = numberFromMeta(metadata, "l2_resolution_pass_mins", TIER2_BASELINE_BY_PRIORITY[priority].resolutionMins);
+  const l3Ack = numberFromMeta(metadata, "l3_acknowledgement_mins", TIER2_BASELINE_BY_PRIORITY[priority].firstResponseMins);
+  const l3Res = resolutionMins;
+  if (l2Ack < b.minL2Ack || l2Ack > b.maxL2Ack) return `Tier 2 l2_acknowledgement_mins for ${priority} must be between ${b.minL2Ack} and ${b.maxL2Ack}.`;
+  if (l2Pass < b.minL2Pass || l2Pass > b.maxL2Pass) return `Tier 2 l2_resolution_pass_mins for ${priority} must be between ${b.minL2Pass} and ${b.maxL2Pass}.`;
+  if (l3Ack < b.minL3Ack || l3Ack > b.maxL3Ack) return `Tier 2 l3_acknowledgement_mins for ${priority} must be between ${b.minL3Ack} and ${b.maxL3Ack}.`;
+  if (l3Res < b.minL3Res || l3Res > b.maxL3Res) return `Tier 2 l3_resolution_mins for ${priority} must be between ${b.minL3Res} and ${b.maxL3Res}.`;
+  return null;
+}
+
 async function validateTier1Bounds(
   organisationId: number,
   priority: PriorityKey,
@@ -91,6 +154,15 @@ export async function createSlaPolicy(req: Request, res: Response) {
         error: `${rangeError} Tier 1 cannot be more aggressive than Tier 2 for the same priority.`,
       });
     }
+  }
+  if (requestedTier === "tier2") {
+    const t2Error = await validateTier2Bounds(
+      requestedPriority,
+      first_response_mins,
+      resolution_mins,
+      safeParseJsonObject(metadata_json)
+    );
+    if (t2Error) return res.status(400).json({ ok: false, error: t2Error });
   }
   const meta =
     metadata_json === null || metadata_json === undefined
@@ -205,6 +277,10 @@ export async function upsertSlaPoliciesBatch(req: Request, res: Response) {
         });
       }
     }
+    if (tier === "tier2") {
+      const t2Error = await validateTier2Bounds(priority, firstResponseMins, resolutionMins, safeParseJsonObject(data.metadata_json));
+      if (t2Error) return res.status(400).json({ ok: false, error: t2Error });
+    }
     const warningPercent = typeof data.warning_percent === "number" ? data.warning_percent : 75;
     const isActive = typeof data.is_active === "boolean" ? data.is_active : true;
     const name = typeof data.name === "string" && data.name.trim() ? data.name.trim() : `Org ${organisationId} ${priority} ${tier === "tier1" ? "Tier1" : "Tier2"}`;
@@ -295,6 +371,12 @@ export async function updateSlaPolicy(req: Request, res: Response) {
         error: `${rangeError} Tier 1 cannot be more aggressive than Tier 2 for the same priority.`,
       });
     }
+  }
+  if (effectiveTier === "tier2") {
+    const currentMeta = safeParseJsonObject(existing.rows[0]?.metadata_json);
+    const incomingMeta = metadata_json === undefined ? currentMeta : safeParseJsonObject(metadata_json);
+    const t2Error = await validateTier2Bounds(effectivePriority, effectiveFirstResponse, effectiveResolution, incomingMeta);
+    if (t2Error) return res.status(400).json({ ok: false, error: t2Error });
   }
 
   const metaUpdate =

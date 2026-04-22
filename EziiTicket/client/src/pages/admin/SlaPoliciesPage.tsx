@@ -188,6 +188,17 @@ type BoundsDraftRow = {
   maxResolutionMins: number;
 };
 
+type Tier2BoundsDraftRow = {
+  minL2AckMins: number;
+  maxL2AckMins: number;
+  minL2PassMins: number;
+  maxL2PassMins: number;
+  minL3AckMins: number;
+  maxL3AckMins: number;
+  minL3ResMins: number;
+  maxL3ResMins: number;
+};
+
 export function SlaPoliciesPage({
   orgId,
   organizationName,
@@ -229,7 +240,62 @@ export function SlaPoliciesPage({
     P3: { first_response_mins: 0, resolution_mins: 0, sourceId: null },
     P4: { first_response_mins: 0, resolution_mins: 0, sourceId: null },
   });
-  const [boundsDraft, setBoundsDraft] = useState<Record<PriorityKey, BoundsDraftRow> | null>(null);
+  const [overrideTier2Draft, setOverrideTier2Draft] = useState<
+    Record<PriorityKey, { l2Ack: number; l2Pass: number; l3Ack: number; l3Res: number; sourceId: number | null }>
+  >({
+    P1: { ...TIER2_INTERNAL_PRESETS.P1, sourceId: null },
+    P2: { ...TIER2_INTERNAL_PRESETS.P2, sourceId: null },
+    P3: { ...TIER2_INTERNAL_PRESETS.P3, sourceId: null },
+    P4: { ...TIER2_INTERNAL_PRESETS.P4, sourceId: null },
+  });
+  const [globalTier1BoundsDraft, setGlobalTier1BoundsDraft] = useState<Record<PriorityKey, BoundsDraftRow>>({
+    P1: { ...FALLBACK_TIER1_BOUNDS.P1 },
+    P2: { ...FALLBACK_TIER1_BOUNDS.P2 },
+    P3: { ...FALLBACK_TIER1_BOUNDS.P3 },
+    P4: { ...FALLBACK_TIER1_BOUNDS.P4 },
+  });
+  const [globalTier2BoundsDraft, setGlobalTier2BoundsDraft] = useState<Record<PriorityKey, Tier2BoundsDraftRow>>({
+    P1: {
+      minL2AckMins: TIER2_INTERNAL_PRESETS.P1.l2Ack,
+      maxL2AckMins: TIER2_INTERNAL_PRESETS.P1.l2Ack,
+      minL2PassMins: TIER2_INTERNAL_PRESETS.P1.l2Pass,
+      maxL2PassMins: TIER2_INTERNAL_PRESETS.P1.l2Pass,
+      minL3AckMins: TIER2_INTERNAL_PRESETS.P1.l3Ack,
+      maxL3AckMins: TIER2_INTERNAL_PRESETS.P1.l3Ack,
+      minL3ResMins: TIER2_INTERNAL_PRESETS.P1.l3Res,
+      maxL3ResMins: TIER2_INTERNAL_PRESETS.P1.l3Res,
+    },
+    P2: {
+      minL2AckMins: TIER2_INTERNAL_PRESETS.P2.l2Ack,
+      maxL2AckMins: TIER2_INTERNAL_PRESETS.P2.l2Ack,
+      minL2PassMins: TIER2_INTERNAL_PRESETS.P2.l2Pass,
+      maxL2PassMins: TIER2_INTERNAL_PRESETS.P2.l2Pass,
+      minL3AckMins: TIER2_INTERNAL_PRESETS.P2.l3Ack,
+      maxL3AckMins: TIER2_INTERNAL_PRESETS.P2.l3Ack,
+      minL3ResMins: TIER2_INTERNAL_PRESETS.P2.l3Res,
+      maxL3ResMins: TIER2_INTERNAL_PRESETS.P2.l3Res,
+    },
+    P3: {
+      minL2AckMins: TIER2_INTERNAL_PRESETS.P3.l2Ack,
+      maxL2AckMins: TIER2_INTERNAL_PRESETS.P3.l2Ack,
+      minL2PassMins: TIER2_INTERNAL_PRESETS.P3.l2Pass,
+      maxL2PassMins: TIER2_INTERNAL_PRESETS.P3.l2Pass,
+      minL3AckMins: TIER2_INTERNAL_PRESETS.P3.l3Ack,
+      maxL3AckMins: TIER2_INTERNAL_PRESETS.P3.l3Ack,
+      minL3ResMins: TIER2_INTERNAL_PRESETS.P3.l3Res,
+      maxL3ResMins: TIER2_INTERNAL_PRESETS.P3.l3Res,
+    },
+    P4: {
+      minL2AckMins: TIER2_INTERNAL_PRESETS.P4.l2Ack,
+      maxL2AckMins: TIER2_INTERNAL_PRESETS.P4.l2Ack,
+      minL2PassMins: TIER2_INTERNAL_PRESETS.P4.l2Pass,
+      maxL2PassMins: TIER2_INTERNAL_PRESETS.P4.l2Pass,
+      minL3AckMins: TIER2_INTERNAL_PRESETS.P4.l3Ack,
+      maxL3AckMins: TIER2_INTERNAL_PRESETS.P4.l3Ack,
+      minL3ResMins: TIER2_INTERNAL_PRESETS.P4.l3Res,
+      maxL3ResMins: TIER2_INTERNAL_PRESETS.P4.l3Res,
+    },
+  });
 
   async function load() {
     if (!orgIdNum) return;
@@ -295,6 +361,13 @@ export function SlaPoliciesPage({
   });
 
   useEffect(() => {
+    const globalBounds = boundsMapFromRows(boundsByOrg[1]);
+    setGlobalTier1BoundsDraft({
+      P1: { ...(globalBounds.P1 ?? FALLBACK_TIER1_BOUNDS.P1) },
+      P2: { ...(globalBounds.P2 ?? FALLBACK_TIER1_BOUNDS.P2) },
+      P3: { ...(globalBounds.P3 ?? FALLBACK_TIER1_BOUNDS.P3) },
+      P4: { ...(globalBounds.P4 ?? FALLBACK_TIER1_BOUNDS.P4) },
+    });
     setGlobalTier1Draft({
       P1: {
         first_response_mins: globalTier1.P1?.first_response_mins ?? TIER1_CUSTOMER_DEFAULTS.P1.firstResponseMins,
@@ -319,7 +392,49 @@ export function SlaPoliciesPage({
       P3: tier2Resolved(globalTier2.P3, "P3"),
       P4: tier2Resolved(globalTier2.P4, "P4"),
     });
-  }, [globalTier1, globalTier2]);
+    setGlobalTier2BoundsDraft({
+      P1: {
+        minL2AckMins: Number(safeParseMeta(globalTier2.P1?.metadata_json).min_l2_ack_mins ?? tier2Resolved(globalTier2.P1, "P1").l2Ack),
+        maxL2AckMins: Number(safeParseMeta(globalTier2.P1?.metadata_json).max_l2_ack_mins ?? tier2Resolved(globalTier2.P1, "P1").l2Ack),
+        minL2PassMins: Number(safeParseMeta(globalTier2.P1?.metadata_json).min_l2_pass_mins ?? tier2Resolved(globalTier2.P1, "P1").l2Pass),
+        maxL2PassMins: Number(safeParseMeta(globalTier2.P1?.metadata_json).max_l2_pass_mins ?? tier2Resolved(globalTier2.P1, "P1").l2Pass),
+        minL3AckMins: Number(safeParseMeta(globalTier2.P1?.metadata_json).min_l3_ack_mins ?? tier2Resolved(globalTier2.P1, "P1").l3Ack),
+        maxL3AckMins: Number(safeParseMeta(globalTier2.P1?.metadata_json).max_l3_ack_mins ?? tier2Resolved(globalTier2.P1, "P1").l3Ack),
+        minL3ResMins: Number(safeParseMeta(globalTier2.P1?.metadata_json).min_l3_res_mins ?? tier2Resolved(globalTier2.P1, "P1").l3Res),
+        maxL3ResMins: Number(safeParseMeta(globalTier2.P1?.metadata_json).max_l3_res_mins ?? tier2Resolved(globalTier2.P1, "P1").l3Res),
+      },
+      P2: {
+        minL2AckMins: Number(safeParseMeta(globalTier2.P2?.metadata_json).min_l2_ack_mins ?? tier2Resolved(globalTier2.P2, "P2").l2Ack),
+        maxL2AckMins: Number(safeParseMeta(globalTier2.P2?.metadata_json).max_l2_ack_mins ?? tier2Resolved(globalTier2.P2, "P2").l2Ack),
+        minL2PassMins: Number(safeParseMeta(globalTier2.P2?.metadata_json).min_l2_pass_mins ?? tier2Resolved(globalTier2.P2, "P2").l2Pass),
+        maxL2PassMins: Number(safeParseMeta(globalTier2.P2?.metadata_json).max_l2_pass_mins ?? tier2Resolved(globalTier2.P2, "P2").l2Pass),
+        minL3AckMins: Number(safeParseMeta(globalTier2.P2?.metadata_json).min_l3_ack_mins ?? tier2Resolved(globalTier2.P2, "P2").l3Ack),
+        maxL3AckMins: Number(safeParseMeta(globalTier2.P2?.metadata_json).max_l3_ack_mins ?? tier2Resolved(globalTier2.P2, "P2").l3Ack),
+        minL3ResMins: Number(safeParseMeta(globalTier2.P2?.metadata_json).min_l3_res_mins ?? tier2Resolved(globalTier2.P2, "P2").l3Res),
+        maxL3ResMins: Number(safeParseMeta(globalTier2.P2?.metadata_json).max_l3_res_mins ?? tier2Resolved(globalTier2.P2, "P2").l3Res),
+      },
+      P3: {
+        minL2AckMins: Number(safeParseMeta(globalTier2.P3?.metadata_json).min_l2_ack_mins ?? tier2Resolved(globalTier2.P3, "P3").l2Ack),
+        maxL2AckMins: Number(safeParseMeta(globalTier2.P3?.metadata_json).max_l2_ack_mins ?? tier2Resolved(globalTier2.P3, "P3").l2Ack),
+        minL2PassMins: Number(safeParseMeta(globalTier2.P3?.metadata_json).min_l2_pass_mins ?? tier2Resolved(globalTier2.P3, "P3").l2Pass),
+        maxL2PassMins: Number(safeParseMeta(globalTier2.P3?.metadata_json).max_l2_pass_mins ?? tier2Resolved(globalTier2.P3, "P3").l2Pass),
+        minL3AckMins: Number(safeParseMeta(globalTier2.P3?.metadata_json).min_l3_ack_mins ?? tier2Resolved(globalTier2.P3, "P3").l3Ack),
+        maxL3AckMins: Number(safeParseMeta(globalTier2.P3?.metadata_json).max_l3_ack_mins ?? tier2Resolved(globalTier2.P3, "P3").l3Ack),
+        minL3ResMins: Number(safeParseMeta(globalTier2.P3?.metadata_json).min_l3_res_mins ?? tier2Resolved(globalTier2.P3, "P3").l3Res),
+        maxL3ResMins: Number(safeParseMeta(globalTier2.P3?.metadata_json).max_l3_res_mins ?? tier2Resolved(globalTier2.P3, "P3").l3Res),
+      },
+      P4: {
+        minL2AckMins: Number(safeParseMeta(globalTier2.P4?.metadata_json).min_l2_ack_mins ?? tier2Resolved(globalTier2.P4, "P4").l2Ack),
+        maxL2AckMins: Number(safeParseMeta(globalTier2.P4?.metadata_json).max_l2_ack_mins ?? tier2Resolved(globalTier2.P4, "P4").l2Ack),
+        minL2PassMins: Number(safeParseMeta(globalTier2.P4?.metadata_json).min_l2_pass_mins ?? tier2Resolved(globalTier2.P4, "P4").l2Pass),
+        maxL2PassMins: Number(safeParseMeta(globalTier2.P4?.metadata_json).max_l2_pass_mins ?? tier2Resolved(globalTier2.P4, "P4").l2Pass),
+        minL3AckMins: Number(safeParseMeta(globalTier2.P4?.metadata_json).min_l3_ack_mins ?? tier2Resolved(globalTier2.P4, "P4").l3Ack),
+        maxL3AckMins: Number(safeParseMeta(globalTier2.P4?.metadata_json).max_l3_ack_mins ?? tier2Resolved(globalTier2.P4, "P4").l3Ack),
+        minL3ResMins: Number(safeParseMeta(globalTier2.P4?.metadata_json).min_l3_res_mins ?? tier2Resolved(globalTier2.P4, "P4").l3Res),
+        maxL3ResMins: Number(safeParseMeta(globalTier2.P4?.metadata_json).max_l3_res_mins ?? tier2Resolved(globalTier2.P4, "P4").l3Res),
+      },
+    });
+  }, [globalTier1, globalTier2, boundsByOrg]);
 
   const overrideOrgCards = useMemo(() => {
     const ownOrgLabel = organizationName?.trim() || `Organization ${orgIdNum ?? "-"}`;
@@ -333,11 +448,10 @@ export function SlaPoliciesPage({
       .map((o) => {
         const rows = rowsByOrg[o.id] ?? [];
         const tier1 = policyMapByPriority(rows, "tier1");
-        const bm = boundsMapFromRows(boundsByOrg[o.id]);
         const compliant = PRIORITY_ORDER.every((p) => {
           const row = tier1[p];
           if (!row) return true;
-          const bounds = bm[p] ?? FALLBACK_TIER1_BOUNDS[p];
+          const bounds = globalTier1BoundsDraft[p] ?? FALLBACK_TIER1_BOUNDS[p];
           const t2 = tier2Resolved(globalTier2[p], p);
           const inRange =
             row.first_response_mins >= bounds.minFirstResponseMins &&
@@ -350,7 +464,7 @@ export function SlaPoliciesPage({
         });
         return { ...o, compliant };
       });
-  }, [externalOrgs, isSystemAdmin, orgIdNum, organizationName, rowsByOrg, boundsByOrg, searchOrg, globalTier2]);
+  }, [externalOrgs, isSystemAdmin, orgIdNum, organizationName, rowsByOrg, searchOrg, globalTier2, globalTier1BoundsDraft]);
 
   const editingOrgName =
     overrideOrgCards.find((o) => o.id === editingOrgId)?.name ??
@@ -360,14 +474,8 @@ export function SlaPoliciesPage({
   function openOverrideEditor(orgIdValue: number) {
     const orgRows = rowsByOrg[orgIdValue] ?? [];
     const tier1 = policyMapByPriority(orgRows, "tier1");
-    const bm = boundsMapFromRows(boundsByOrg[orgIdValue]);
+    const tier2 = policyMapByPriority(orgRows, "tier2");
     setEditingOrgId(orgIdValue);
-    setBoundsDraft({
-      P1: { ...(bm.P1 ?? FALLBACK_TIER1_BOUNDS.P1) },
-      P2: { ...(bm.P2 ?? FALLBACK_TIER1_BOUNDS.P2) },
-      P3: { ...(bm.P3 ?? FALLBACK_TIER1_BOUNDS.P3) },
-      P4: { ...(bm.P4 ?? FALLBACK_TIER1_BOUNDS.P4) },
-    });
     setOverrideDraft({
       P1: {
         first_response_mins:
@@ -406,6 +514,12 @@ export function SlaPoliciesPage({
         sourceId: tier1.P4?.id ?? null,
       },
     });
+    setOverrideTier2Draft({
+      P1: { ...tier2Resolved(tier2.P1 ?? globalTier2.P1, "P1"), sourceId: tier2.P1?.id ?? null },
+      P2: { ...tier2Resolved(tier2.P2 ?? globalTier2.P2, "P2"), sourceId: tier2.P2?.id ?? null },
+      P3: { ...tier2Resolved(tier2.P3 ?? globalTier2.P3, "P3"), sourceId: tier2.P3?.id ?? null },
+      P4: { ...tier2Resolved(tier2.P4 ?? globalTier2.P4, "P4"), sourceId: tier2.P4?.id ?? null },
+    });
   }
 
   function resetOverrideDefaults() {
@@ -432,49 +546,104 @@ export function SlaPoliciesPage({
         resolution_mins: globalTier1.P4?.resolution_mins ?? TIER1_CUSTOMER_DEFAULTS.P4.resolutionMins,
       },
     }));
+    setOverrideTier2Draft((prev) => ({
+      ...prev,
+      P1: { ...prev.P1, ...tier2Resolved(globalTier2.P1, "P1") },
+      P2: { ...prev.P2, ...tier2Resolved(globalTier2.P2, "P2") },
+      P3: { ...prev.P3, ...tier2Resolved(globalTier2.P3, "P3") },
+      P4: { ...prev.P4, ...tier2Resolved(globalTier2.P4, "P4") },
+    }));
   }
 
   async function saveOverride() {
-    if (!editingOrgId || !boundsDraft) return;
+    if (!editingOrgId) return;
     if (!canEdit) return toast.error("You do not have modify access for SLA settings");
+    if (
+      canEditTier2 &&
+      PRIORITY_ORDER.some((p) => {
+        const d = overrideTier2Draft[p];
+        const b = globalTier2BoundsDraft[p];
+        return (
+          d.l2Ack < b.minL2AckMins ||
+          d.l2Ack > b.maxL2AckMins ||
+          d.l2Pass < b.minL2PassMins ||
+          d.l2Pass > b.maxL2PassMins ||
+          d.l3Ack < b.minL3AckMins ||
+          d.l3Ack > b.maxL3AckMins ||
+          d.l3Res < b.minL3ResMins ||
+          d.l3Res > b.maxL3ResMins
+        );
+      })
+    ) {
+      return toast.error("Tier 2 values must be within global min/max ranges");
+    }
     setSavingOverride(true);
     try {
-      await putSlaTier1Bounds(
-        editingOrgId,
-        PRIORITY_ORDER.map((p) => ({
-          priority: p,
-          min_first_response_mins: boundsDraft[p].minFirstResponseMins,
-          max_first_response_mins: boundsDraft[p].maxFirstResponseMins,
-          min_resolution_mins: boundsDraft[p].minResolutionMins,
-          max_resolution_mins: boundsDraft[p].maxResolutionMins,
-        }))
-      );
       for (const p of PRIORITY_ORDER) {
-        const d = overrideDraft[p];
-        if (!d) continue;
-        if (d.sourceId) {
-          await updateSlaPolicy(d.sourceId, {
-            first_response_mins: d.first_response_mins,
-            resolution_mins: d.resolution_mins,
-            warning_percent: 75,
-            is_active: true,
-          });
-        } else {
-          await createSlaPolicy({
-            organisation_id: editingOrgId,
-            name: `${editingOrgName} ${p} Tier1`,
-            tier: "tier1",
-            priority: p,
-            first_response_mins: d.first_response_mins,
-            resolution_mins: d.resolution_mins,
-            warning_percent: 75,
-            is_active: true,
-          });
+        if (canEditTier1) {
+          const d = overrideDraft[p];
+          if (!d) continue;
+          if (d.sourceId) {
+            await updateSlaPolicy(d.sourceId, {
+              first_response_mins: d.first_response_mins,
+              resolution_mins: d.resolution_mins,
+              warning_percent: 75,
+              is_active: true,
+            });
+          } else {
+            await createSlaPolicy({
+              organisation_id: editingOrgId,
+              name: `${editingOrgName} ${p} Tier1`,
+              tier: "tier1",
+              priority: p,
+              first_response_mins: d.first_response_mins,
+              resolution_mins: d.resolution_mins,
+              warning_percent: 75,
+              is_active: true,
+            });
+          }
+        }
+        if (canEditTier2) {
+          const d2 = overrideTier2Draft[p];
+          if (!d2) continue;
+          if (d2.sourceId) {
+            const current = rowsByOrg[editingOrgId]?.find((r) => r.id === d2.sourceId);
+            const metadata = safeParseMeta(current?.metadata_json);
+            await updateSlaPolicy(d2.sourceId, {
+              first_response_mins: d2.l2Ack,
+              resolution_mins: d2.l3Res,
+              warning_percent: current?.warning_percent ?? 75,
+              is_active: true,
+              metadata_json: JSON.stringify({
+                ...metadata,
+                l2_acknowledgement_mins: d2.l2Ack,
+                l2_resolution_pass_mins: d2.l2Pass,
+                l3_acknowledgement_mins: d2.l3Ack,
+                l3_resolution_mins: d2.l3Res,
+              }),
+            });
+          } else {
+            await createSlaPolicy({
+              organisation_id: editingOrgId,
+              name: `${editingOrgName} ${p} Tier2`,
+              tier: "tier2",
+              priority: p,
+              first_response_mins: d2.l2Ack,
+              resolution_mins: d2.l3Res,
+              warning_percent: 75,
+              is_active: true,
+              metadata_json: JSON.stringify({
+                l2_acknowledgement_mins: d2.l2Ack,
+                l2_resolution_pass_mins: d2.l2Pass,
+                l3_acknowledgement_mins: d2.l3Ack,
+                l3_resolution_mins: d2.l3Res,
+              }),
+            });
+          }
         }
       }
       toast.success("Overrides saved.");
       setEditingOrgId(null);
-      setBoundsDraft(null);
       await load();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save overrides");
@@ -487,6 +656,16 @@ export function SlaPoliciesPage({
     if (!canEdit) return toast.error("You do not have modify access for SLA settings");
     setSavingGlobal(true);
     try {
+      await putSlaTier1Bounds(
+        1,
+        PRIORITY_ORDER.map((p) => ({
+          priority: p,
+          min_first_response_mins: globalTier1BoundsDraft[p].minFirstResponseMins,
+          max_first_response_mins: globalTier1BoundsDraft[p].maxFirstResponseMins,
+          min_resolution_mins: globalTier1BoundsDraft[p].minResolutionMins,
+          max_resolution_mins: globalTier1BoundsDraft[p].maxResolutionMins,
+        }))
+      );
       const orgs = await getExternalOrganizations().catch(() => []);
       const targetOrgIds = Array.from(
         new Set([1, ...orgs.map((o) => Number(o.id)).filter((id) => Number.isFinite(id) && id > 0)])
@@ -535,6 +714,14 @@ export function SlaPoliciesPage({
               l2_resolution_pass_mins: draft.l2Pass,
               l3_acknowledgement_mins: draft.l3Ack,
               l3_resolution_mins: draft.l3Res,
+              min_l2_ack_mins: globalTier2BoundsDraft[p].minL2AckMins,
+              max_l2_ack_mins: globalTier2BoundsDraft[p].maxL2AckMins,
+              min_l2_pass_mins: globalTier2BoundsDraft[p].minL2PassMins,
+              max_l2_pass_mins: globalTier2BoundsDraft[p].maxL2PassMins,
+              min_l3_ack_mins: globalTier2BoundsDraft[p].minL3AckMins,
+              max_l3_ack_mins: globalTier2BoundsDraft[p].maxL3AckMins,
+              min_l3_res_mins: globalTier2BoundsDraft[p].minL3ResMins,
+              max_l3_res_mins: globalTier2BoundsDraft[p].maxL3ResMins,
             });
             policiesPayload.push({
               tier: "tier2",
@@ -614,35 +801,35 @@ export function SlaPoliciesPage({
             <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-[#111827] dark:text-slate-100">
-                  Tier 1 — Customer-facing SLA (configurable)
+                  Tier 1 — Customer-facing SLA
                 </div>
                 <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-bold text-sky-700 dark:bg-sky-500/20 dark:text-sky-300">
                   Default global
                 </span>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[720px] text-left text-[11px]">
+              <div className="overflow-hidden">
+                <table className="w-full table-fixed text-left text-[10px]">
                   <thead>
                     <tr className="border-b border-black/10 text-[10px] uppercase tracking-wide text-slate-500 dark:border-white/10 dark:text-slate-400">
-                      <th className="py-2 pr-2">Priority</th>
-                      <th className="py-2 pr-2">Definition</th>
-                      <th className="py-2 pr-2">L1 first response</th>
-                      <th className="py-2 pr-2">L1 resolution</th>
-                      <th className="py-2">Visible to customer?</th>
+                      <th className="w-[100px] py-1.5 pr-0.5">Priority</th>
+                      <th className="py-1.5 pr-0.5">Definition</th>
+                      <th className="py-1.5 pr-0.5">L1 first response</th>
+                      <th className="py-1.5 pr-0.5">L1 resolution</th>
+                      <th className="py-1.5">Visible to customer?</th>
                     </tr>
                   </thead>
                   <tbody>
                     {PRIORITY_ORDER.map((p) => (
                       <tr key={p} className="border-b border-black/5 align-top dark:border-white/5">
-                        <td className="py-2 pr-2">
-                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${PRIORITY_META[p].badgeClass}`}>
+                        <td className="w-[100px] py-1.5 pr-0.5">
+                          <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${PRIORITY_META[p].badgeClass}`}>
                             {p} — {PRIORITY_META[p].label}
                           </span>
                         </td>
-                        <td className="max-w-[220px] py-2 pr-2 text-slate-600 dark:text-slate-300">
+                        <td className="py-1.5 pr-0.5 text-slate-600 dark:text-slate-300">
                           {tier1DefinitionLine(globalTier1[p], p)}
                         </td>
-                        <td className="py-2 pr-2">
+                        <td className="py-1.5 pr-0.5">
                           {globalEditMode && canEditTier1 ? (
                             <input
                               type="number"
@@ -653,7 +840,7 @@ export function SlaPoliciesPage({
                                   [p]: { ...prev[p], first_response_mins: Number(e.target.value) },
                                 }))
                               }
-                              className="w-24 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                              className="w-full max-w-[74px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                             />
                           ) : (
                             minutesLabel(
@@ -661,7 +848,7 @@ export function SlaPoliciesPage({
                             )
                           )}
                         </td>
-                        <td className="py-2 pr-2 font-semibold text-[#111827] dark:text-slate-100">
+                        <td className="py-1.5 pr-0.5 font-semibold text-[#111827] dark:text-slate-100">
                           {globalEditMode && canEditTier1 ? (
                             <input
                               type="number"
@@ -672,7 +859,7 @@ export function SlaPoliciesPage({
                                   [p]: { ...prev[p], resolution_mins: Number(e.target.value) },
                                 }))
                               }
-                              className="w-24 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                              className="w-full max-w-[74px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                             />
                           ) : (
                             minutesLabel(
@@ -680,7 +867,7 @@ export function SlaPoliciesPage({
                             )
                           )}
                         </td>
-                        <td className="py-2">{tier1CustomerVisible(globalTier1[p]) ? "Yes" : "No"}</td>
+                        <td className="py-1.5">{tier1CustomerVisible(globalTier1[p]) ? "Yes" : "No"}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -691,21 +878,21 @@ export function SlaPoliciesPage({
             <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-[#111827] dark:text-slate-100">
-                  Tier 2 — Internal Ezii SLA (fixed targets)
+                  Tier 2 — Internal Ezii SLA
                 </div>
                 <span className="rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-bold text-violet-800 dark:bg-violet-500/20 dark:text-violet-200">
                   Global editable (screen access)
                 </span>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[860px] text-left text-[11px]">
+              <div className="overflow-hidden">
+                <table className="w-full table-fixed text-left text-[10px]">
                   <thead>
                     <tr className="border-b border-black/10 text-[10px] uppercase tracking-wide text-slate-500 dark:border-white/10 dark:text-slate-400">
-                      <th className="py-2 pr-2">Priority</th>
-                      <th className="py-2 pr-2">L2 acknowledgement</th>
-                      <th className="py-2 pr-2">L2 resolution / pass to L3</th>
-                      <th className="py-2 pr-2">L3 acknowledgement</th>
-                      <th className="py-2">L3 resolution target</th>
+                      <th className="w-[100px] py-1.5 pr-0.5">Priority</th>
+                      <th className="py-1.5 pr-0.5">L2 acknowledgement</th>
+                      <th className="py-1.5 pr-0.5">L2 resolution / pass to L3</th>
+                      <th className="py-1.5 pr-0.5">L3 acknowledgement</th>
+                      <th className="py-1.5">L3 resolution target</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -713,12 +900,12 @@ export function SlaPoliciesPage({
                       const t = tier2Resolved(globalTier2[p], p);
                       return (
                         <tr key={p} className="border-b border-black/5 dark:border-white/5">
-                          <td className="py-2 pr-2">
-                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${PRIORITY_META[p].badgeClass}`}>
+                          <td className="w-[100px] py-1.5 pr-0.5">
+                            <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${PRIORITY_META[p].badgeClass}`}>
                               {p} — {PRIORITY_META[p].label}
                             </span>
                           </td>
-                          <td className="py-2 pr-2">
+                          <td className="py-1.5 pr-0.5">
                             {globalEditMode && canEditTier2 ? (
                               <input
                                 type="number"
@@ -729,13 +916,13 @@ export function SlaPoliciesPage({
                                     [p]: { ...prev[p], l2Ack: Number(e.target.value) },
                                   }))
                                 }
-                                className="w-20 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                                className="w-full max-w-[68px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                               />
                             ) : (
                               minutesLabel(t.l2Ack)
                             )}
                           </td>
-                          <td className="py-2 pr-2">
+                          <td className="py-1.5 pr-0.5">
                             {globalEditMode && canEditTier2 ? (
                               <input
                                 type="number"
@@ -746,13 +933,13 @@ export function SlaPoliciesPage({
                                     [p]: { ...prev[p], l2Pass: Number(e.target.value) },
                                   }))
                                 }
-                                className="w-20 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                                className="w-full max-w-[68px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                               />
                             ) : (
                               minutesLabel(t.l2Pass)
                             )}
                           </td>
-                          <td className="py-2 pr-2">
+                          <td className="py-1.5 pr-0.5">
                             {globalEditMode && canEditTier2 ? (
                               <input
                                 type="number"
@@ -763,13 +950,13 @@ export function SlaPoliciesPage({
                                     [p]: { ...prev[p], l3Ack: Number(e.target.value) },
                                   }))
                                 }
-                                className="w-20 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                                className="w-full max-w-[68px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                               />
                             ) : (
                               minutesLabel(t.l3Ack)
                             )}
                           </td>
-                          <td className="py-2 font-semibold text-[#111827] dark:text-slate-100">
+                          <td className="py-1.5 font-semibold text-[#111827] dark:text-slate-100">
                             {globalEditMode && canEditTier2 ? (
                               <input
                                 type="number"
@@ -780,7 +967,7 @@ export function SlaPoliciesPage({
                                     [p]: { ...prev[p], l3Res: Number(e.target.value) },
                                   }))
                                 }
-                                className="w-20 rounded-lg border border-black/10 bg-white/90 px-2 py-1 text-xs dark:border-white/15 dark:bg-white/10"
+                                className="w-full max-w-[68px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                               />
                             ) : (
                               minutesLabel(t.l3Res)
@@ -833,16 +1020,112 @@ export function SlaPoliciesPage({
             </GlassCard>
           </div>
 
+          <div className="space-y-4">
+            <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+              <div className="mb-2 text-sm font-semibold text-[#111827] dark:text-slate-100">
+                Tier 1 allowed min/max (global)
+              </div>
+              <p className="mb-3 text-[10px] text-slate-500 dark:text-slate-400">
+                Global one-time bounds for Tier 1. These apply across all organizations.
+              </p>
+              <div className="overflow-hidden">
+                <table className="w-full table-fixed text-left text-[9px]">
+                  <thead>
+                    <tr className="border-b border-black/10 text-[9px] uppercase tracking-wide text-slate-500 dark:border-white/10">
+                      <th className="py-1.5 pr-0.5">Pri</th>
+                      <th className="py-1.5 pr-0.5">Min FR</th>
+                      <th className="py-1.5 pr-0.5">Max FR</th>
+                      <th className="py-1.5 pr-0.5">Min Res</th>
+                      <th className="py-1.5">Max Res</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {PRIORITY_ORDER.map((p) => (
+                      <tr key={p} className="border-b border-black/5 dark:border-white/5">
+                        <td className="py-1.5 pr-0.5 font-semibold">{p}</td>
+                        {(["minFirstResponseMins", "maxFirstResponseMins", "minResolutionMins", "maxResolutionMins"] as const).map((key) => (
+                          <td key={key} className="py-1.5 pr-0.5">
+                            <input
+                              type="number"
+                              value={globalTier1BoundsDraft[p][key]}
+                              onChange={(e) =>
+                                setGlobalTier1BoundsDraft((prev) => ({
+                                  ...prev,
+                                  [p]: { ...prev[p], [key]: Number(e.target.value) },
+                                }))
+                              }
+                              disabled={!globalEditMode || !canEditTier1}
+                              className="w-full max-w-[64px] rounded border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] disabled:opacity-60 dark:border-white/15 dark:bg-white/10"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </GlassCard>
+
+            <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+              <div className="mb-2 text-sm font-semibold text-[#111827] dark:text-slate-100">
+                Tier 2 allowed min/max (global)
+              </div>
+              <p className="mb-3 text-[10px] text-slate-500 dark:text-slate-400">
+                Global one-time min/max guidance for Tier 2 targets.
+              </p>
+              <div className="overflow-hidden">
+                <table className="w-full table-fixed text-left text-[9px]">
+                  <thead>
+                    <tr className="border-b border-black/10 text-[9px] uppercase tracking-wide text-slate-500 dark:border-white/10">
+                      <th className="py-1.5 pr-0.5">Pri</th>
+                      <th className="py-1.5 pr-0.5">Min L2 Ack</th>
+                      <th className="py-1.5 pr-0.5">Max L2 Ack</th>
+                      <th className="py-1.5 pr-0.5">Min L2 Pass</th>
+                      <th className="py-1.5 pr-0.5">Max L2 Pass</th>
+                      <th className="py-1.5 pr-0.5">Min L3 Ack</th>
+                      <th className="py-1.5 pr-0.5">Max L3 Ack</th>
+                      <th className="py-1.5 pr-0.5">Min L3 Res</th>
+                      <th className="py-1.5">Max L3 Res</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {PRIORITY_ORDER.map((p) => (
+                      <tr key={p} className="border-b border-black/5 dark:border-white/5">
+                        <td className="py-1.5 pr-0.5 font-semibold">{p}</td>
+                        {(["minL2AckMins", "maxL2AckMins", "minL2PassMins", "maxL2PassMins", "minL3AckMins", "maxL3AckMins", "minL3ResMins", "maxL3ResMins"] as const).map((key) => (
+                          <td key={key} className="py-1.5 pr-0.5">
+                            <input
+                              type="number"
+                              value={globalTier2BoundsDraft[p][key]}
+                              onChange={(e) =>
+                                setGlobalTier2BoundsDraft((prev) => ({
+                                  ...prev,
+                                  [p]: { ...prev[p], [key]: Number(e.target.value) },
+                                }))
+                              }
+                              disabled={!globalEditMode || !canEditTier2}
+                              className="w-full max-w-[64px] rounded border border-black/10 bg-white/90 px-1 py-0.5 text-[9px] disabled:opacity-60 dark:border-white/15 dark:bg-white/10"
+                            />
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </GlassCard>
+          </div>
+
         </div>
       ) : null}
 
-      {editingOrgId && boundsDraft && typeof document !== "undefined"
+      {editingOrgId && typeof document !== "undefined"
         ? createPortal(
           <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
             <div className="max-h-[95vh] w-full max-w-6xl overflow-y-auto overflow-hidden rounded-2xl border border-black/10 bg-white/95 shadow-2xl dark:border-white/15 dark:bg-[#080D16]/95">
               <div className="flex items-center justify-between border-b border-black/10 px-5 py-4 dark:border-white/10">
                 <div className="text-base font-semibold text-[#111827] dark:text-slate-100">{editingOrgName} Override</div>
-                <button type="button" onClick={() => { setEditingOrgId(null); setBoundsDraft(null); }} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
+                <button type="button" onClick={() => { setEditingOrgId(null); }} className="rounded-lg p-2 text-slate-500 hover:bg-black/5 dark:text-slate-300 dark:hover:bg-white/10"><X className="h-4 w-4" /></button>
               </div>
               <div className="grid grid-cols-1 gap-4 p-5 xl:grid-cols-[2fr]">
                 <div className="space-y-4">
@@ -869,7 +1152,7 @@ export function SlaPoliciesPage({
                         <tbody>
                           {PRIORITY_ORDER.map((p) => {
                             const d = overrideDraft[p];
-                            const bounds = boundsDraft[p] ?? FALLBACK_TIER1_BOUNDS[p];
+                            const bounds = globalTier1BoundsDraft[p] ?? FALLBACK_TIER1_BOUNDS[p];
                             const t2 = tier2Resolved(globalTier2[p], p);
                             const inRange =
                               d.first_response_mins >= bounds.minFirstResponseMins &&
@@ -924,49 +1207,113 @@ export function SlaPoliciesPage({
                     </div>
                   </div>
 
-                  <div className="rounded-xl border border-black/10 bg-black/[0.02] p-4 dark:border-white/10 dark:bg-white/[0.04]">
-                    <div className="mb-2 text-[10px] font-bold uppercase tracking-wide text-[#1E88E5]">Tier 1 allowed min/max (this org)</div>
-                    <p className="mb-3 text-[10px] text-slate-500 dark:text-slate-400">System Admin adjusts valid ranges per customer organization. Targets above must fall within these bands.</p>
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[640px] text-left text-[10px]">
+                  <div>
+                    <div className="mb-3 text-base font-semibold text-[#115ca8] dark:text-blue-300">Editable Tier 2 targets</div>
+                    <div className="overflow-x-auto rounded-xl border border-black/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
+                      <table className="w-full min-w-[900px] text-left text-xs">
                         <thead>
-                          <tr className="border-b border-black/10 text-[9px] uppercase tracking-wide text-slate-500 dark:border-white/10">
-                            <th className="py-2 pr-2">Pri</th>
-                            <th className="py-2 pr-2">Min FR</th>
-                            <th className="py-2 pr-2">Max FR</th>
-                            <th className="py-2 pr-2">Min res</th>
-                            <th className="py-2">Max res</th>
+                          <tr className="border-b border-black/10 text-[10px] uppercase tracking-wide text-slate-500 dark:border-white/10 dark:text-slate-400">
+                            <th className="px-4 py-3">Priority</th>
+                            <th className="px-4 py-3">L2 ack (mins)</th>
+                            <th className="px-4 py-3">L2 pass to L3 (mins)</th>
+                            <th className="px-4 py-3">L3 ack (mins)</th>
+                            <th className="px-4 py-3">L3 resolution (mins)</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {PRIORITY_ORDER.map((p) => (
-                            <tr key={p} className="border-b border-black/5 dark:border-white/5">
-                              <td className="py-2 pr-2 font-semibold">{p}</td>
-                              {(["minFirstResponseMins", "maxFirstResponseMins", "minResolutionMins", "maxResolutionMins"] as const).map((key) => (
-                                <td key={key} className="py-2 pr-2">
+                          {PRIORITY_ORDER.map((p) => {
+                            const d = overrideTier2Draft[p];
+                            const b = globalTier2BoundsDraft[p];
+                            const tier2Ok =
+                              d.l2Ack >= b.minL2AckMins &&
+                              d.l2Ack <= b.maxL2AckMins &&
+                              d.l2Pass >= b.minL2PassMins &&
+                              d.l2Pass <= b.maxL2PassMins &&
+                              d.l3Ack >= b.minL3AckMins &&
+                              d.l3Ack <= b.maxL3AckMins &&
+                              d.l3Res >= b.minL3ResMins &&
+                              d.l3Res <= b.maxL3ResMins;
+                            return (
+                              <tr key={p} className="border-b border-black/5 dark:border-white/5">
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className={`h-2 w-2 rounded-full ${PRIORITY_META[p].dotClass}`} />
+                                    <div className="font-semibold text-[#114d87] dark:text-blue-300">{p} - {PRIORITY_META[p].label}</div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3">
                                   <input
                                     type="number"
-                                    value={boundsDraft[p][key]}
+                                    value={d.l2Ack}
                                     onChange={(e) =>
-                                      setBoundsDraft((prev) =>
-                                        prev
-                                          ? {
-                                              ...prev,
-                                              [p]: { ...prev[p], [key]: Number(e.target.value) },
-                                            }
-                                          : prev
-                                      )
+                                      setOverrideTier2Draft((prev) => ({
+                                        ...prev,
+                                        [p]: { ...prev[p], l2Ack: Number(e.target.value) },
+                                      }))
                                     }
-                                    className="w-20 rounded border border-black/10 bg-white/90 px-1.5 py-1 dark:border-white/15 dark:bg-white/10"
+                                    disabled={!canEditTier2}
+                                    className={`w-24 rounded-lg border px-2 py-1.5 text-xs disabled:opacity-60 dark:bg-white/10 ${d.l2Ack >= b.minL2AckMins && d.l2Ack <= b.maxL2AckMins ? "border-black/10 bg-white/90 dark:border-white/15" : "border-red-400 bg-red-50 dark:border-red-400/50 dark:bg-red-500/10"}`}
                                   />
+                                  <div className="mt-1 text-[10px] italic text-slate-500">Allowed {b.minL2AckMins}-{b.maxL2AckMins}</div>
                                 </td>
-                              ))}
-                            </tr>
-                          ))}
+                                <td className="px-4 py-3">
+                                  <input
+                                    type="number"
+                                    value={d.l2Pass}
+                                    onChange={(e) =>
+                                      setOverrideTier2Draft((prev) => ({
+                                        ...prev,
+                                        [p]: { ...prev[p], l2Pass: Number(e.target.value) },
+                                      }))
+                                    }
+                                    disabled={!canEditTier2}
+                                    className={`w-24 rounded-lg border px-2 py-1.5 text-xs disabled:opacity-60 dark:bg-white/10 ${d.l2Pass >= b.minL2PassMins && d.l2Pass <= b.maxL2PassMins ? "border-black/10 bg-white/90 dark:border-white/15" : "border-red-400 bg-red-50 dark:border-red-400/50 dark:bg-red-500/10"}`}
+                                  />
+                                  <div className="mt-1 text-[10px] italic text-slate-500">Allowed {b.minL2PassMins}-{b.maxL2PassMins}</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <input
+                                    type="number"
+                                    value={d.l3Ack}
+                                    onChange={(e) =>
+                                      setOverrideTier2Draft((prev) => ({
+                                        ...prev,
+                                        [p]: { ...prev[p], l3Ack: Number(e.target.value) },
+                                      }))
+                                    }
+                                    disabled={!canEditTier2}
+                                    className={`w-24 rounded-lg border px-2 py-1.5 text-xs disabled:opacity-60 dark:bg-white/10 ${d.l3Ack >= b.minL3AckMins && d.l3Ack <= b.maxL3AckMins ? "border-black/10 bg-white/90 dark:border-white/15" : "border-red-400 bg-red-50 dark:border-red-400/50 dark:bg-red-500/10"}`}
+                                  />
+                                  <div className="mt-1 text-[10px] italic text-slate-500">Allowed {b.minL3AckMins}-{b.maxL3AckMins}</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <input
+                                    type="number"
+                                    value={d.l3Res}
+                                    onChange={(e) =>
+                                      setOverrideTier2Draft((prev) => ({
+                                        ...prev,
+                                        [p]: { ...prev[p], l3Res: Number(e.target.value) },
+                                      }))
+                                    }
+                                    disabled={!canEditTier2}
+                                    className={`w-24 rounded-lg border px-2 py-1.5 text-xs disabled:opacity-60 dark:bg-white/10 ${d.l3Res >= b.minL3ResMins && d.l3Res <= b.maxL3ResMins ? "border-black/10 bg-white/90 dark:border-white/15" : "border-red-400 bg-red-50 dark:border-red-400/50 dark:bg-red-500/10"}`}
+                                  />
+                                  <div className="mt-1 text-[10px] italic text-slate-500">Allowed {b.minL3ResMins}-{b.maxL3ResMins}</div>
+                                  <div className="mt-1">
+                                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${tier2Ok ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" : "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300"}`}>
+                                      {tier2Ok ? "OK" : "Out of global Tier 2 band"}
+                                    </span>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>
                   </div>
+
                 </div>
               </div>
             </div>

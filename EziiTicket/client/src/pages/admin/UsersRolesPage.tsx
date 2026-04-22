@@ -1041,8 +1041,8 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
   }
 
   function renderUserTableRow(row: UserTableRow) {
-    const canEditLevel =
-      activeOrgId == null || activeOrgId === 1 ? true : isEziiInvitedSectionRow(row);
+    // Allow support tier assignment (L1/L2/L3) for both customer and Ezii-invited users.
+    const canEditLevel = true;
     const selectedRoleId =
       rowRoleMap[row.user_id] ??
       assignedRoleIdByUserId[row.user_id] ??

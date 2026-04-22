@@ -56,25 +56,12 @@ function parseBigint(v: unknown): bigint | null {
 async function ensureDefaultRoles(organisationId: bigint) {
   // Ensure default roles exist and have the default permission matrix stored in `permissions_json`.
   // Note: for now this is data-only (Option A). Authorization is not yet derived from these fields.
-  const commonRoles = [
-    [
-      "customer",
-      "End user; can access own tickets",
-      permissionsJsonWithScreen({}, false),
-    ],
-    [
-      "org_admin",
-      "Customer org admin; can access org tickets",
-      permissionsJsonWithScreen({}, false),
-    ],
+  const internalSupportDefaultRoles = [
     [
       "agent",
       "Support agent; workspace access is defined by role and routing stage by support level",
       permissionsJsonWithScreenAgentTier({}),
     ],
-  ] as const;
-
-  const eziiOnlyRoles = [
     [
       "team_lead",
       "Team lead; visibility + intervention",
@@ -87,12 +74,21 @@ async function ensureDefaultRoles(organisationId: bigint) {
     ],
   ] as const;
 
-  // Customer orgs should get default operational roles too, except system_admin.
-  const nonSystemOperationalRoles = eziiOnlyRoles.filter(([name]) => name !== "system_admin");
+  const customerOrgDefaultRoles = [
+    [
+      "customer",
+      "End user; can access own tickets",
+      permissionsJsonWithScreen({}, false),
+    ],
+    [
+      "org_admin",
+      "Customer org admin; can access org tickets",
+      permissionsJsonWithScreen({}, false),
+    ],
+  ] as const;
+
   const rolesForOrg =
-    organisationId === BigInt(1)
-      ? [...commonRoles, ...eziiOnlyRoles]
-      : [...commonRoles, ...nonSystemOperationalRoles];
+    organisationId === BigInt(1) ? internalSupportDefaultRoles : customerOrgDefaultRoles;
 
   for (const [name, description, permissionsJson] of rolesForOrg) {
     await pool.query(
@@ -111,6 +107,25 @@ async function ensureDefaultRoles(organisationId: bigint) {
                else roles.permissions_json
              end`,
       [organisationId, name, description, permissionsJson]
+    );
+  }
+
+  // Normalize any stale default flags so old policies are not reintroduced.
+  if (organisationId === BigInt(1)) {
+    await pool.query(
+      `update roles
+       set is_default = false
+       where organisation_id = $1
+         and lower(regexp_replace(trim(replace(name, '_', ' ')), '\s+', ' ', 'g')) in ('customer', 'org admin')`,
+      [organisationId]
+    );
+  } else {
+    await pool.query(
+      `update roles
+       set is_default = false
+       where organisation_id = $1
+         and lower(regexp_replace(trim(replace(name, '_', ' ')), '\s+', ' ', 'g')) in ('agent', 'team lead', 'system admin')`,
+      [organisationId]
     );
   }
 }
