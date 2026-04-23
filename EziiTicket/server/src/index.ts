@@ -63,7 +63,7 @@ app.listen(env.port, () => {
     scheduleAttendanceOooMidnightSync();
     // eslint-disable-next-line no-console
     console.log(
-      `[attendance-ooo] midnight sync enabled (orgId=${env.attendanceOooSyncOrgId}, base=${env.leaveBaseUrl})`
+      `[attendance-ooo] midnight sync enabled (primaryOrgId=${env.attendanceOooSyncOrgId} + customer orgs with support-level users; base=${env.leaveBaseUrl})`
     );
   }
 });

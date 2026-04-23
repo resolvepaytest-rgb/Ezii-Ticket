@@ -285,16 +285,54 @@ export async function runAttendanceOooSync(args: {
     };
   }
 
+  const hqOrgId = 1;
   const usersRes = await pool.query<OrgUserRow>(
-    `select user_id::text as user_id,
-            nullif(trim(both from email), '') as email,
-            nullif(trim(both from employee_number), '') as employee_number,
-            nullif(trim(both from attendance_id), '') as attendance_id
-     from users
-     where organisation_id = $1::bigint`,
+    args.organisationId === hqOrgId
+      ? `select user_id::text as user_id,
+                nullif(trim(both from email), '') as email,
+                nullif(trim(both from employee_number), '') as employee_number,
+                nullif(trim(both from attendance_id), '') as attendance_id
+         from users
+         where organisation_id = $1::bigint`
+      : `select u.user_id::text as user_id,
+                nullif(trim(both from u.email), '') as email,
+                nullif(trim(both from u.employee_number), '') as employee_number,
+                nullif(trim(both from u.attendance_id), '') as attendance_id
+         from users u
+         where u.organisation_id = $1::bigint
+           and exists (
+             select 1
+             from user_org_support_levels uosl
+             join org_support_levels osl
+               on osl.id = uosl.support_level_id
+              and osl.organisation_id = u.organisation_id
+             where uosl.user_id = u.user_id
+               and uosl.is_active = true
+           )`,
     [args.organisationId]
   );
+
+  if (args.organisationId !== hqOrgId && usersRes.rows.length === 0) {
+    return {
+      ok: true,
+      organisationId: args.organisationId,
+      start_date: startDate,
+      end_date: endDate,
+      rowsFromApi: rows.length,
+      updatedTrue: 0,
+      updatedFalse: 0,
+      unresolvedRows: 0,
+      users_with_leave: 0,
+    };
+  }
+
   const maps = buildOrgUserLookup(usersRes.rows);
+  const scopedUserIds =
+    args.organisationId === hqOrgId
+      ? null
+      : usersRes.rows
+          .map((r) => Number(r.user_id))
+          .filter((n) => Number.isFinite(n) && n > 0);
 
   const rangeByUser = new Map<number, { min: string; max: string }>();
   let unresolvedRows = 0;
@@ -318,11 +356,20 @@ export async function runAttendanceOooSync(args: {
   }
 
   const today = ymdLocal(new Date());
-  const beforeRes = await pool.query<{ user_id: string; out_of_office: boolean }>(
-    `select user_id::text, coalesce(out_of_office, false) as out_of_office
-     from users where organisation_id = $1::bigint`,
-    [args.organisationId]
-  );
+  const beforeRes =
+    scopedUserIds && scopedUserIds.length
+      ? await pool.query<{ user_id: string; out_of_office: boolean }>(
+          `select user_id::text, coalesce(out_of_office, false) as out_of_office
+           from users
+           where organisation_id = $1::bigint
+             and user_id = any($2::bigint[])`,
+          [args.organisationId, scopedUserIds]
+        )
+      : await pool.query<{ user_id: string; out_of_office: boolean }>(
+          `select user_id::text, coalesce(out_of_office, false) as out_of_office
+           from users where organisation_id = $1::bigint`,
+          [args.organisationId]
+        );
   const beforeOoo = new Map<number, boolean>();
   for (const r of beforeRes.rows) {
     const uid = Number(r.user_id);
@@ -350,16 +397,30 @@ export async function runAttendanceOooSync(args: {
   }
 
   const keepIds = [...rangeByUser.keys()];
-  const clear = await pool.query(
-    `update users
-     set out_of_office = false,
-         ooo_start_date = null,
-         ooo_end_date = null,
-         updated_at = now()
-     where organisation_id = $1::bigint
-       and not (user_id = any($2::bigint[]))`,
-    [args.organisationId, keepIds.length ? keepIds : [-1]]
-  );
+  const keepParam = keepIds.length ? keepIds : [-1];
+  const clear =
+    scopedUserIds && scopedUserIds.length
+      ? await pool.query(
+          `update users
+           set out_of_office = false,
+               ooo_start_date = null,
+               ooo_end_date = null,
+               updated_at = now()
+           where organisation_id = $1::bigint
+             and user_id = any($3::bigint[])
+             and not (user_id = any($2::bigint[]))`,
+          [args.organisationId, keepParam, scopedUserIds]
+        )
+      : await pool.query(
+          `update users
+           set out_of_office = false,
+               ooo_start_date = null,
+               ooo_end_date = null,
+               updated_at = now()
+           where organisation_id = $1::bigint
+             and not (user_id = any($2::bigint[]))`,
+          [args.organisationId, keepParam]
+        );
   const updatedFalse = clear.rowCount ?? 0;
 
   if (newlyOooUserIds.length > 0) {
@@ -398,8 +459,40 @@ function msUntilNextLocalMidnight(): number {
 }
 
 /**
+ * Org ids for the nightly job: primary (`ATTENDANCE_OOO_SYNC_ORG_ID`, default 1) plus any
+ * non–org-1 tenant that has at least one active `user_org_support_levels` row tied to that org’s levels.
+ */
+export async function listOrganisationIdsForMidnightAttendanceOooSync(): Promise<number[]> {
+  const primary = env.attendanceOooSyncOrgId;
+  const ids = new Set<number>();
+  if (Number.isFinite(primary) && primary > 0) ids.add(primary);
+
+  const res = await pool.query<{ organisation_id: number }>(
+    `select distinct u.organisation_id::int as organisation_id
+     from users u
+     where u.organisation_id is not null
+       and u.organisation_id <> 1
+       and exists (
+         select 1
+         from user_org_support_levels uosl
+         join org_support_levels osl
+           on osl.id = uosl.support_level_id
+          and osl.organisation_id = u.organisation_id
+         where uosl.user_id = u.user_id
+           and uosl.is_active = true
+       )`
+  );
+  for (const row of res.rows) {
+    const n = Number(row.organisation_id);
+    if (Number.isFinite(n) && n > 0) ids.add(n);
+  }
+  return Array.from(ids).sort((a, b) => a - b);
+}
+
+/**
  * Runs once at the next local midnight, then chains forever. Uses the server process timezone
  * (set `TZ` in the environment if you need a specific region’s midnight).
+ * Syncs HQ (`ATTENDANCE_OOO_SYNC_ORG_ID`) and each customer org that has users with an assigned support level.
  */
 export function scheduleAttendanceOooMidnightSync(): void {
   const tick = () => {
@@ -407,23 +500,34 @@ export function scheduleAttendanceOooMidnightSync(): void {
     setTimeout(async () => {
       const ymd = ymdLocal(new Date());
       try {
-        const summary = await runAttendanceOooSync({
-          organisationId: env.attendanceOooSyncOrgId,
-          startDate: ymd,
-          endDate: ymd,
-        });
-        if (!summary.ok) {
-          // eslint-disable-next-line no-console
-          console.warn("[attendance-ooo] sync failed:", summary.error ?? "unknown");
-        } else {
-          // eslint-disable-next-line no-console
-          console.log(
-            `[attendance-ooo] org=${summary.organisationId} range=${summary.start_date}..${summary.end_date} api_rows=${summary.rowsFromApi} -> new_ooo_today=${summary.updatedTrue} cleared=${summary.updatedFalse} leave_users=${summary.users_with_leave} unmatched=${summary.unresolvedRows}`
-          );
+        const orgIds = await listOrganisationIdsForMidnightAttendanceOooSync();
+        for (const organisationId of orgIds) {
+          try {
+            const summary = await runAttendanceOooSync({
+              organisationId,
+              startDate: ymd,
+              endDate: ymd,
+            });
+            if (!summary.ok) {
+              // eslint-disable-next-line no-console
+              console.warn("[attendance-ooo] sync failed:", {
+                organisationId,
+                err: summary.error ?? "unknown",
+              });
+            } else {
+              // eslint-disable-next-line no-console
+              console.log(
+                `[attendance-ooo] org=${summary.organisationId} range=${summary.start_date}..${summary.end_date} api_rows=${summary.rowsFromApi} -> new_ooo_today=${summary.updatedTrue} cleared=${summary.updatedFalse} leave_users=${summary.users_with_leave} unmatched=${summary.unresolvedRows}`
+              );
+            }
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn("[attendance-ooo] sync error:", organisationId, (err as Error).message);
+          }
         }
       } catch (err) {
         // eslint-disable-next-line no-console
-        console.warn("[attendance-ooo] sync error:", (err as Error).message);
+        console.warn("[attendance-ooo] midnight org list error:", (err as Error).message);
       }
       tick();
     }, delay);

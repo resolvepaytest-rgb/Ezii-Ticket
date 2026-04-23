@@ -328,12 +328,19 @@ function formatRoleCreatedDate(role: Role) {
   });
 }
 
+function normalizeIncomingApplyRoleTo(raw: string | null | undefined): ApplyRoleTo {
+  const s = String(raw ?? "all").trim() || "all";
+  if (s === "customer_org" || s === "internal_support") return "all";
+  if (s === "all" || s === "reportees" || s === "worker_type" || s === "attribute") return s;
+  return "all";
+}
+
 function applyFieldsFromRole(role: Role | null): Pick<
   DraftState,
   "apply_role_to" | "apply_attribute_id" | "apply_sub_attribute_id" | "apply_worker_type_id"
 > {
   return {
-    apply_role_to: (role?.apply_role_to as ApplyRoleTo) ?? "all",
+    apply_role_to: normalizeIncomingApplyRoleTo(role?.apply_role_to ?? undefined),
     apply_attribute_id: role?.apply_attribute_id ?? "",
     apply_sub_attribute_id: role?.apply_sub_attribute_id ?? "",
     apply_worker_type_id: role?.apply_worker_type_id ?? "",
@@ -410,7 +417,9 @@ export function RolesPage() {
     const needsCustomerDefaults = activeOrgId !== 1;
     return defaults.filter((r) => {
       const isCustomerDefault = CUSTOMER_ORG_DEFAULT_ROLE_KEYS.has(baselineRoleKey(r.name));
-      return needsCustomerDefaults ? isCustomerDefault : !isCustomerDefault;
+      // Org 1 now includes org_admin as default too; only hide pure customer role there.
+      if (!needsCustomerDefaults) return baselineRoleKey(r.name) !== "customer";
+      return isCustomerDefault;
     });
   }, [visibleRoles, activeOrgId]);
   const customRoles = useMemo(() => visibleRoles.filter((r) => !r.is_default), [visibleRoles]);
@@ -819,13 +828,22 @@ export function RolesPage() {
                   const rp = permissionsSafe(role.permissions_json);
                   const counts = permissionCounts(rp);
                   const isYourRole = yourRoleKey != null && baselineRoleKey(role.name) === yourRoleKey;
-                  const roleType: "internal_support" | "customer_org" = role.is_default
-                    ? CUSTOMER_ORG_DEFAULT_ROLE_KEYS.has(baselineRoleKey(role.name))
+                  const roleKey = baselineRoleKey(role.name);
+                  const currentOrgId = roleOrgId(role) ?? activeOrgId;
+                  const roleType: "internal_support" | "customer_org" =
+                    role.role_type === "internal_support" || role.role_type === "customer_org"
+                      ? role.role_type
+                      : role.is_default
+                    ? roleKey === "customer"
                       ? "customer_org"
-                      : "internal_support"
+                      : roleKey === "org admin"
+                        ? currentOrgId === 1
+                          ? "internal_support"
+                          : "customer_org"
+                        : "internal_support"
                     : roleOrgId(role) === 1
-                    ? "internal_support"
-                    : "customer_org";
+                      ? "internal_support"
+                      : "customer_org";
                   return (
                     <tr
                       key={role.id}
@@ -994,8 +1012,7 @@ export function RolesPage() {
                   <p className="mb-3 text-[11px] leading-relaxed text-slate-500">
                     Restricts which tickets this role&apos;s permissions apply to (server-enforced on list/get/update).
                     Modes: <code className="text-[10px]">all</code>, <code className="text-[10px]">reportees</code>,{" "}
-                    <code className="text-[10px]">attribute</code>, <code className="text-[10px]">customer_org</code>,{" "}
-                    <code className="text-[10px]">internal_support</code>. Reportees are resolved at runtime for the
+                    <code className="text-[10px]">attribute</code>. Reportees are resolved at runtime for the
                     logged-in user. Attribute supports multiple attributes and sub-attributes.
                   </p>
                   <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -1021,8 +1038,6 @@ export function RolesPage() {
                         <option value="all">All</option>
                         <option value="reportees">Reportees</option>
                         <option value="attribute">Attribute</option>
-                        <option value="customer_org">Customer Org</option>
-                        <option value="internal_support">Internal Support</option>
                       </select>
                     </label>
                     {effectiveDraft.apply_role_to === "attribute" ? (
@@ -1178,16 +1193,6 @@ export function RolesPage() {
                     {effectiveDraft.apply_role_to === "reportees" ? (
                       <p className="text-[11px] text-slate-500 md:col-span-2">
                         Reportees scope is evaluated at runtime for the logged-in user and is not pre-fetched here.
-                      </p>
-                    ) : null}
-                    {effectiveDraft.apply_role_to === "customer_org" ? (
-                      <p className="text-[11px] text-slate-500 md:col-span-2">
-                        Customer org scope applies to users/tickets outside org 1 (tenant org users only).
-                      </p>
-                    ) : null}
-                    {effectiveDraft.apply_role_to === "internal_support" ? (
-                      <p className="text-[11px] text-slate-500 md:col-span-2">
-                        Internal support scope applies to internal team agent users (org 1 support pool).
                       </p>
                     ) : null}
                   </div>

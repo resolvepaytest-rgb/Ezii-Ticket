@@ -79,29 +79,5 @@ export function ticketMatchesRoleApplyScope(
     return sub != null && allowedSubs.includes(sub);
   }
 
-  if (mode === "customer_org") {
-    const metadataOrgId =
-      metaStr(ticketMetadata, "organisation_id") ??
-      metaStr(ticketMetadata, "organization_id") ??
-      metaStr(ticketMetadata, "customer_org_id");
-    if (metadataOrgId != null) return Number(metadataOrgId) !== 1;
-    return ticketOrganisationId != null ? Number(ticketOrganisationId) !== 1 : false;
-  }
-
-  if (mode === "internal_support") {
-    const internalFlag = metaStr(ticketMetadata, "internal_support");
-    if (internalFlag != null) {
-      const normalized = internalFlag.toLowerCase();
-      if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
-      if (normalized === "false" || normalized === "0" || normalized === "no") return false;
-    }
-    const metadataOrgId =
-      metaStr(ticketMetadata, "organisation_id") ??
-      metaStr(ticketMetadata, "organization_id") ??
-      metaStr(ticketMetadata, "customer_org_id");
-    if (metadataOrgId != null) return Number(metadataOrgId) === 1;
-    return ticketOrganisationId != null ? Number(ticketOrganisationId) === 1 : false;
-  }
-
   return true;
 }

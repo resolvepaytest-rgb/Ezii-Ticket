@@ -15,7 +15,7 @@ export type CanonicalPermissionSchema = {
   data_scope: {
     tickets?: TicketDataScope;
     ticket_filters?: {
-      apply_role_to?: "all" | "reportees" | "worker_type" | "attribute" | "customer_org" | "internal_support";
+      apply_role_to?: "all" | "reportees" | "worker_type" | "attribute";
       attribute_id?: string | null;
       sub_attribute_id?: string | null;
     };

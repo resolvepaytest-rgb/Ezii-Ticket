@@ -7,7 +7,7 @@ import { isEziiSystemAdmin } from "./eziiSystemAdmin.js";
 import { fetchExternalOrgGet } from "../../services/externalOrgApiClient.js";
 import { EXTERNAL_ORG_PATHS } from "../../config/externalOrgApi.js";
 
-const APPLY_MODES = new Set(["all", "reportees", "worker_type", "attribute", "customer_org", "internal_support"]);
+const APPLY_MODES = new Set(["all", "reportees", "worker_type", "attribute"]);
 
 type ScopedUserRow = {
   user_id: number;
@@ -89,6 +89,17 @@ function rolesCreatedAtSelectExpr(hasCreatedAt: boolean) {
   return hasCreatedAt ? "created_at" : "null::timestamptz as created_at";
 }
 
+function normalizeRoleNameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/_/g, " ").replace(/\s+/g, " ");
+}
+
+function resolveRoleType(orgId: number, roleName: string): "internal_support" | "customer_org" {
+  const key = normalizeRoleNameKey(roleName);
+  if (key === "customer") return "customer_org";
+  if (key === "org admin") return orgId === 1 ? "internal_support" : "customer_org";
+  return orgId === 1 ? "internal_support" : "customer_org";
+}
+
 function parseApplyRolePayload(
   body: Record<string, unknown> | undefined | null,
   defaults?: {
@@ -144,14 +155,25 @@ export async function getRoles(req: Request, res: Response) {
   const authOrgId = asInt(req.user?.org_id);
   if (!authOrgId) return res.status(400).json({ ok: false, error: "invalid organisation" });
   const requestedOrgId = asInt(req.query.organisation_id);
-  const orgId = isEziiSystemAdmin(req) && requestedOrgId ? requestedOrgId : authOrgId;
+  const allowOrg1InternalSupportCatalog = requestedOrgId === 1;
+  const orgId =
+    requestedOrgId && (isEziiSystemAdmin(req) || allowOrg1InternalSupportCatalog)
+      ? requestedOrgId
+      : authOrgId;
   await ensureTenantAndDefaultsByOrgId(orgId);
   const hasCreatedAt = await rolesHasCreatedAtColumn();
   const createdAtExpr = rolesCreatedAtSelectExpr(hasCreatedAt);
   const result = await pool.query(
-    `select id, organisation_id, name, description, is_default, permissions_json,
-            apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id, ${createdAtExpr}
-     from roles where organisation_id = $1 order by id asc`,
+    allowOrg1InternalSupportCatalog && !isEziiSystemAdmin(req)
+      ? `select id, organisation_id, name, description, role_type, is_default, permissions_json,
+                apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id, ${createdAtExpr}
+         from roles
+         where organisation_id = $1
+           and role_type = 'internal_support'
+         order by id asc`
+      : `select id, organisation_id, name, description, role_type, is_default, permissions_json,
+                apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id, ${createdAtExpr}
+         from roles where organisation_id = $1 order by id asc`,
     [orgId]
   );
   return res.json({ ok: true, data: result.rows });
@@ -177,26 +199,21 @@ export async function createRole(req: Request, res: Response) {
   const hasCreatedAt = await rolesHasCreatedAtColumn();
   const createdAtExpr = rolesCreatedAtSelectExpr(hasCreatedAt);
   const roleBody = (req.body ?? {}) as Record<string, unknown>;
-  const inferredApplyRoleTo = orgId === 1 ? "internal_support" : "customer_org";
-  const requestedApplyRoleTo =
-    typeof roleBody.apply_role_to === "string" ? roleBody.apply_role_to.trim() : "";
-  const normalizedApplyBody: Record<string, unknown> =
-    requestedApplyRoleTo && requestedApplyRoleTo !== "all"
-      ? roleBody
-      : { ...roleBody, apply_role_to: inferredApplyRoleTo };
-  const apply = parseApplyRolePayload(normalizedApplyBody);
+  const apply = parseApplyRolePayload(roleBody);
   if ("error" in apply) return res.status(400).json({ ok: false, error: apply.error });
   const rolePermissionsStr = JSON.stringify(rolePermissions);
+  const roleType = resolveRoleType(orgId, name.trim());
   const result = await pool.query(
-    `insert into roles (organisation_id, name, description, permissions_json, is_default,
+    `insert into roles (organisation_id, name, description, role_type, permissions_json, is_default,
                         apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id)
-     values ($1,$2,$3,coalesce($4::jsonb,'{}'::jsonb),false,$5,$6,$7,$8)
-     returning id, organisation_id, name, description, is_default, permissions_json,
+     values ($1,$2,$3,$4,coalesce($5::jsonb,'{}'::jsonb),false,$6,$7,$8,$9)
+     returning id, organisation_id, name, description, role_type, is_default, permissions_json,
                apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id, ${createdAtExpr}`,
     [
       orgId,
       name.trim(),
       description ?? null,
+      roleType,
       rolePermissionsStr,
       apply.apply_role_to,
       apply.apply_attribute_id,
@@ -240,20 +257,6 @@ export async function listScopedUsersByRole(req: Request, res: Response) {
 
   if (mode === "all") {
     return res.json({ ok: true, data: users, meta: { mode, total: users.length } });
-  }
-
-  if (mode === "customer_org") {
-    const filtered = users.filter((u) => Number(u.organisation_id) !== 1);
-    return res.json({ ok: true, data: filtered, meta: { mode, total: filtered.length } });
-  }
-
-  if (mode === "internal_support") {
-    const filtered = users.filter((u) => {
-      if (Number(u.organisation_id) === 1) return true;
-      const roleName = String(u.role_name ?? "").toLowerCase();
-      return roleName.includes("agent") || roleName.includes("support") || roleName.includes("team");
-    });
-    return res.json({ ok: true, data: filtered, meta: { mode, total: filtered.length } });
   }
 
   if (mode === "reportees") {
@@ -383,6 +386,8 @@ export async function updateRole(req: Request, res: Response) {
   if (isEziiOrg && row0.is_default && nextName && nextName !== row0.name) {
     return res.status(403).json({ ok: false, error: "default role names cannot be changed in org 1" });
   }
+  const effectiveRoleName = nextName || String(row0.name ?? "");
+  const roleType = resolveRoleType(orgId, effectiveRoleName);
   const hasCreatedAt = await rolesHasCreatedAtColumn();
   const createdAtExpr = rolesCreatedAtSelectExpr(hasCreatedAt);
   const result = await pool.query(
@@ -390,12 +395,13 @@ export async function updateRole(req: Request, res: Response) {
      set name = coalesce($2, name),
          description = coalesce($3, description),
          permissions_json = coalesce($4::jsonb, permissions_json),
+         role_type = $10,
          apply_role_to = $6,
          apply_attribute_id = $7,
          apply_sub_attribute_id = $8,
          apply_worker_type_id = $9
      where id=$1 and organisation_id = $5
-     returning id, organisation_id, name, description, is_default, permissions_json,
+     returning id, organisation_id, name, description, role_type, is_default, permissions_json,
                apply_role_to, apply_attribute_id, apply_sub_attribute_id, apply_worker_type_id, ${createdAtExpr}`,
     [
       id,
@@ -407,6 +413,7 @@ export async function updateRole(req: Request, res: Response) {
       apply.apply_attribute_id,
       apply.apply_sub_attribute_id,
       apply.apply_worker_type_id,
+      roleType,
     ]
   );
 

@@ -798,7 +798,7 @@ export function SlaPoliciesPage({
       {!loading && !error ? (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[2fr_1fr]">
           <div className="space-y-4">
-            <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+            <GlassCard className="border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.05]">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-[#111827] dark:text-slate-100">
                   Tier 1 — Customer-facing SLA
@@ -811,7 +811,7 @@ export function SlaPoliciesPage({
                 <table className="w-full table-fixed text-left text-[10px]">
                   <thead>
                     <tr className="border-b border-black/10 text-[10px] uppercase tracking-wide text-slate-500 dark:border-white/10 dark:text-slate-400">
-                      <th className="w-[100px] py-1.5 pr-0.5">Priority</th>
+                      <th className="w-[88px] py-1 pr-0.5">Priority</th>
                       <th className="py-1.5 pr-0.5">Definition</th>
                       <th className="py-1.5 pr-0.5">L1 first response</th>
                       <th className="py-1.5 pr-0.5">L1 resolution</th>
@@ -821,7 +821,7 @@ export function SlaPoliciesPage({
                   <tbody>
                     {PRIORITY_ORDER.map((p) => (
                       <tr key={p} className="border-b border-black/5 align-top dark:border-white/5">
-                        <td className="w-[100px] py-1.5 pr-0.5">
+                        <td className="w-[88px] py-1 pr-0.5">
                           <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${PRIORITY_META[p].badgeClass}`}>
                             {p} — {PRIORITY_META[p].label}
                           </span>
@@ -840,7 +840,7 @@ export function SlaPoliciesPage({
                                   [p]: { ...prev[p], first_response_mins: Number(e.target.value) },
                                 }))
                               }
-                              className="w-full max-w-[74px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
+                              className="w-full max-w-[60px] rounded-lg border border-black/10 bg-white/90 px-1 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                             />
                           ) : (
                             minutesLabel(
@@ -859,7 +859,7 @@ export function SlaPoliciesPage({
                                   [p]: { ...prev[p], resolution_mins: Number(e.target.value) },
                                 }))
                               }
-                              className="w-full max-w-[74px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
+                              className="w-full max-w-[60px] rounded-lg border border-black/10 bg-white/90 px-1 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                             />
                           ) : (
                             minutesLabel(
@@ -875,7 +875,7 @@ export function SlaPoliciesPage({
               </div>
             </GlassCard>
 
-            <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
+            <GlassCard className="border-black/10 bg-white/75 p-3 dark:border-white/10 dark:bg-white/[0.05]">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-[#111827] dark:text-slate-100">
                   Tier 2 — Internal Ezii SLA
@@ -888,7 +888,7 @@ export function SlaPoliciesPage({
                 <table className="w-full table-fixed text-left text-[10px]">
                   <thead>
                     <tr className="border-b border-black/10 text-[10px] uppercase tracking-wide text-slate-500 dark:border-white/10 dark:text-slate-400">
-                      <th className="w-[100px] py-1.5 pr-0.5">Priority</th>
+                      <th className="w-[88px] py-1 pr-0.5">Priority</th>
                       <th className="py-1.5 pr-0.5">L2 acknowledgement</th>
                       <th className="py-1.5 pr-0.5">L2 resolution / pass to L3</th>
                       <th className="py-1.5 pr-0.5">L3 acknowledgement</th>
@@ -900,7 +900,7 @@ export function SlaPoliciesPage({
                       const t = tier2Resolved(globalTier2[p], p);
                       return (
                         <tr key={p} className="border-b border-black/5 dark:border-white/5">
-                          <td className="w-[100px] py-1.5 pr-0.5">
+                          <td className="w-[88px] py-1 pr-0.5">
                             <span className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${PRIORITY_META[p].badgeClass}`}>
                               {p} — {PRIORITY_META[p].label}
                             </span>
@@ -916,7 +916,7 @@ export function SlaPoliciesPage({
                                     [p]: { ...prev[p], l2Ack: Number(e.target.value) },
                                   }))
                                 }
-                                className="w-full max-w-[68px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
+                                className="w-full max-w-[58px] rounded-lg border border-black/10 bg-white/90 px-1 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                               />
                             ) : (
                               minutesLabel(t.l2Ack)
@@ -933,7 +933,7 @@ export function SlaPoliciesPage({
                                     [p]: { ...prev[p], l2Pass: Number(e.target.value) },
                                   }))
                                 }
-                                className="w-full max-w-[68px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
+                                className="w-full max-w-[58px] rounded-lg border border-black/10 bg-white/90 px-1 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                               />
                             ) : (
                               minutesLabel(t.l2Pass)
@@ -950,7 +950,7 @@ export function SlaPoliciesPage({
                                     [p]: { ...prev[p], l3Ack: Number(e.target.value) },
                                   }))
                                 }
-                                className="w-full max-w-[68px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
+                                className="w-full max-w-[58px] rounded-lg border border-black/10 bg-white/90 px-1 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                               />
                             ) : (
                               minutesLabel(t.l3Ack)
@@ -967,7 +967,7 @@ export function SlaPoliciesPage({
                                     [p]: { ...prev[p], l3Res: Number(e.target.value) },
                                   }))
                                 }
-                                className="w-full max-w-[68px] rounded-lg border border-black/10 bg-white/90 px-1.5 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
+                                className="w-full max-w-[58px] rounded-lg border border-black/10 bg-white/90 px-1 py-0.5 text-[10px] dark:border-white/15 dark:bg-white/10"
                               />
                             ) : (
                               minutesLabel(t.l3Res)
@@ -984,12 +984,14 @@ export function SlaPoliciesPage({
             <GlassCard className="border-black/10 bg-white/75 p-4 dark:border-white/10 dark:bg-white/[0.05]">
               <div className="mb-3 flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-[#111827] dark:text-slate-100">Organization Overrides</div>
-                <input
-                  value={searchOrg}
-                  onChange={(e) => setSearchOrg(e.target.value)}
-                  placeholder="Filter orgs..."
-                  className="w-[180px] rounded-lg border border-black/10 bg-white/85 px-3 py-1.5 text-xs dark:border-white/15 dark:bg-white/10"
-                />
+                {isSystemAdmin ? (
+                  <input
+                    value={searchOrg}
+                    onChange={(e) => setSearchOrg(e.target.value)}
+                    placeholder="Filter orgs..."
+                    className="w-[180px] rounded-lg border border-black/10 bg-white/85 px-3 py-1.5 text-xs dark:border-white/15 dark:bg-white/10"
+                  />
+                ) : null}
               </div>
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                 {overrideOrgCards.map((org) => (
@@ -1210,7 +1212,7 @@ export function SlaPoliciesPage({
                   <div>
                     <div className="mb-3 text-base font-semibold text-[#115ca8] dark:text-blue-300">Editable Tier 2 targets</div>
                     <div className="overflow-x-auto rounded-xl border border-black/10 bg-white/70 dark:border-white/10 dark:bg-white/[0.04]">
-                      <table className="w-full min-w-[900px] text-left text-xs">
+                      <table className="w-full min-w-[980px] text-left text-xs">
                         <thead>
                           <tr className="border-b border-black/10 text-[10px] uppercase tracking-wide text-slate-500 dark:border-white/10 dark:text-slate-400">
                             <th className="px-4 py-3">Priority</th>
@@ -1218,6 +1220,7 @@ export function SlaPoliciesPage({
                             <th className="px-4 py-3">L2 pass to L3 (mins)</th>
                             <th className="px-4 py-3">L3 ack (mins)</th>
                             <th className="px-4 py-3">L3 resolution (mins)</th>
+                            <th className="px-4 py-3">Compliance</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -1300,6 +1303,8 @@ export function SlaPoliciesPage({
                                     className={`w-24 rounded-lg border px-2 py-1.5 text-xs disabled:opacity-60 dark:bg-white/10 ${d.l3Res >= b.minL3ResMins && d.l3Res <= b.maxL3ResMins ? "border-black/10 bg-white/90 dark:border-white/15" : "border-red-400 bg-red-50 dark:border-red-400/50 dark:bg-red-500/10"}`}
                                   />
                                   <div className="mt-1 text-[10px] italic text-slate-500">Allowed {b.minL3ResMins}-{b.maxL3ResMins}</div>
+                                </td>
+                                <td className="px-4 py-3">
                                   <div className="mt-1">
                                     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${tier2Ok ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300" : "bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300"}`}>
                                       {tier2Ok ? "OK" : "Out of global Tier 2 band"}

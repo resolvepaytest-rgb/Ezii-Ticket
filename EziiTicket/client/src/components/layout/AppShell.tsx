@@ -15,6 +15,8 @@ type AppShellProps = PropsWithChildren<{
   sidebarOrgName?: string;
   sidebarOrgSubtitle?: string;
   sidebarOrgLogoUrl?: string;
+  /** True while external user/profile is loading — sidebar shows org skeleton. */
+  sidebarOrgProfilePending?: boolean;
   sidebarItems?: SidebarItem[];
   activeNavKey?: string;
   onNavSelect?: (key: string) => void;
@@ -40,6 +42,7 @@ export function AppShell({
   sidebarOrgName,
   sidebarOrgSubtitle,
   sidebarOrgLogoUrl,
+  sidebarOrgProfilePending = false,
   sidebarItems,
   activeNavKey,
   onNavSelect,
@@ -122,6 +125,7 @@ export function AppShell({
                 orgName={sidebarOrgName}
                 orgSubtitle={sidebarOrgSubtitle}
                 orgLogoUrl={sidebarOrgLogoUrl}
+                orgProfilePending={sidebarOrgProfilePending}
                 items={sidebarItems}
                 activeKey={activeNavKey}
                 onSelect={(k) => {
@@ -141,6 +145,7 @@ export function AppShell({
           orgName={sidebarOrgName}
           orgSubtitle={sidebarOrgSubtitle}
           orgLogoUrl={sidebarOrgLogoUrl}
+          orgProfilePending={sidebarOrgProfilePending}
           items={sidebarItems}
           activeKey={activeNavKey}
           onSelect={onNavSelect}

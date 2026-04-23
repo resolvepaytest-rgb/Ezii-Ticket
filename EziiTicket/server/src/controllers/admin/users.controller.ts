@@ -7,6 +7,17 @@ import { redistributeOpenTicketsForOooUsers } from "../../services/tickets/redis
 
 const TEMPLATE_ROLES_ORG_ID = 1;
 
+function normalizeRoleNameKey(name: string): string {
+  return name.trim().toLowerCase().replace(/_/g, " ").replace(/\s+/g, " ");
+}
+
+function resolveRoleType(targetOrgId: number, roleName: string): "internal_support" | "customer_org" {
+  const key = normalizeRoleNameKey(roleName);
+  if (key === "customer") return "customer_org";
+  if (key === "org admin") return targetOrgId === 1 ? "internal_support" : "customer_org";
+  return targetOrgId === 1 ? "internal_support" : "customer_org";
+}
+
 /**
  * When assigning roles scoped to a customer org, the admin UI may send role_ids from the
  * Ezii (org 1) catalog. Resolve each id to a row in `targetOrgId`: reuse if already there,
@@ -31,9 +42,10 @@ async function resolveRoleIdToTargetOrganisation(
   const tmpl = await pool.query<{
     name: string;
     description: string | null;
+    role_type: string | null;
     permissions_json: unknown;
   }>(
-    `select name, description, permissions_json
+    `select name, description, role_type, permissions_json
      from roles
      where id = $1 and organisation_id = $2`,
     [roleId, TEMPLATE_ROLES_ORG_ID]
@@ -59,10 +71,16 @@ async function resolveRoleIdToTargetOrganisation(
   }
 
   const ins = await pool.query<{ id: string }>(
-    `insert into roles (organisation_id, name, description, permissions_json, is_default)
-     values ($1, $2, $3, coalesce($4::jsonb, '{}'::jsonb), false)
+    `insert into roles (organisation_id, name, description, role_type, permissions_json, is_default)
+     values ($1, $2, $3, $4, coalesce($5::jsonb, '{}'::jsonb), false)
      returning id::text`,
-    [targetOrgId, name, t.description ?? null, t.permissions_json ?? {}]
+    [
+      targetOrgId,
+      name,
+      t.description ?? null,
+      t.role_type === "internal_support" ? "internal_support" : resolveRoleType(targetOrgId, name),
+      t.permissions_json ?? {},
+    ]
   );
   const newId = ins.rows[0]?.id;
   if (!newId) {
@@ -433,7 +451,12 @@ export async function setUserRoles(req: Request, res: Response) {
 
   // Scoped assignment is allowed for any caller who already passed route-level users modify checks.
   const effectiveScopeOrgId = scopedOrgId ?? inferredScopeOrgId;
-  const rolesOrgId = effectiveScopeOrgId ?? userOrgId;
+  // Ezii invited into tenant org: keep role binding to org 1 templates (do not clone into tenant).
+  const isEziiInvitedToTenantScope =
+    userOrgId === TEMPLATE_ROLES_ORG_ID &&
+    effectiveScopeOrgId != null &&
+    effectiveScopeOrgId !== TEMPLATE_ROLES_ORG_ID;
+  const rolesOrgId = isEziiInvitedToTenantScope ? TEMPLATE_ROLES_ORG_ID : (effectiveScopeOrgId ?? userOrgId);
 
   let finalRoleIds = parsedRoleIds;
   if (isEziiSystemAdmin(req) && rolesOrgId !== TEMPLATE_ROLES_ORG_ID) {

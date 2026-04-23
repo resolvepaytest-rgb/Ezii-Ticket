@@ -92,6 +92,10 @@ function isLegacyLevelRoleName(name: string | null | undefined): boolean {
   return n === "l1_agent" || n === "l2_specialist" || n === "l3_engineer";
 }
 
+function isSystemAdminRoleName(name: string | null | undefined): boolean {
+  return String(name ?? "").trim().toLowerCase() === "system_admin";
+}
+
 /** Routing tier from `user_org_support_levels` / org_support_levels (not from ticket role). */
 function tierKeyFromUserDesignation(d: UserDesignation | null | undefined): string {
   return normalizeLevelKey(
@@ -154,6 +158,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
   const [users, setUsers] = useState<User[]>([]);
   const [sourceUsers, setSourceUsers] = useState<User[]>([]);
   const [roles, setRoles] = useState<Role[]>([]);
+  const [org1Roles, setOrg1Roles] = useState<Role[]>([]);
   const [designations, setDesignations] = useState<Designation[]>([]);
   const [scopeRows, setScopeRows] = useState<UserScopeOrg[]>([]);
   const [assignedRoleByUserId, setAssignedRoleByUserId] = useState<Record<number, string>>({});
@@ -237,8 +242,9 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     setError(null);
     try {
       const sourceOrgId = targetOrgId !== 1 ? 1 : targetOrgId;
-      const [rolesRes, designationsRes, targetUsersRes, sourceUsersRes, scopedRes, directoryBundle] = await Promise.all([
+      const [rolesRes, org1RolesRes, designationsRes, targetUsersRes, sourceUsersRes, scopedRes, directoryBundle] = await Promise.all([
         listRoles(targetOrgId),
+        targetOrgId !== 1 ? listRoles(1).catch(() => [] as Role[]) : Promise.resolve([] as Role[]),
         listDesignations(targetOrgId).catch(() => [] as Designation[]),
         listUsers(targetOrgId),
         listUsers(sourceOrgId),
@@ -261,6 +267,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
           .map((r) => [Number(r.id), String(r.name ?? "").trim()])
       );
       setRoles(rolesRes);
+      setOrg1Roles(org1RolesRes);
       setDesignations(designationsRes);
       setUsers(targetUsersRes);
       setSourceUsers(sourceUsersRes);
@@ -284,12 +291,13 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                 getUserDesignation(uid, targetOrgId).catch(() => null),
               ]);
               const scoped = list.find((r) => Number(r.scope_organisation_id) === targetOrgId);
-              const global = list.find(
+              const globalForSelectedOrg = list.find(
                 (r) =>
                   r.scope_organisation_id == null &&
                   targetOrgRoleIds.has(Number(r.role_id))
               );
-              const chosen = scoped ?? global ?? null;
+              // In tenant views, never fall back to an unrelated global role from another org.
+              const chosen = targetOrgId === 1 ? (scoped ?? globalForSelectedOrg ?? null) : (scoped ?? null);
               const chosenRoleId = chosen?.role_id ? Number(chosen.role_id) : null;
               const chosenRoleName =
                 chosenRoleId != null
@@ -323,10 +331,24 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         })(),
       ]);
 
-      const fromDirectoryNames = Object.fromEntries(directoryBundle.users.map((d) => [d.user_id, d.ticket_role || ""]));
+      const fromDirectoryNames = Object.fromEntries(
+        directoryBundle.users
+          .filter(
+            (d) =>
+              d.ticket_role_id != null &&
+              Number.isFinite(Number(d.ticket_role_id)) &&
+              targetOrgRoleIds.has(Number(d.ticket_role_id))
+          )
+          .map((d) => [d.user_id, d.ticket_role || ""])
+      );
       const fromDirectoryIds = Object.fromEntries(
         directoryBundle.users
-          .filter((d) => d.ticket_role_id != null && Number.isFinite(Number(d.ticket_role_id)))
+          .filter(
+            (d) =>
+              d.ticket_role_id != null &&
+              Number.isFinite(Number(d.ticket_role_id)) &&
+              targetOrgRoleIds.has(Number(d.ticket_role_id))
+          )
           .map((d) => [d.user_id, Number(d.ticket_role_id)])
       );
 
@@ -351,6 +373,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
       setUsers([]);
       setSourceUsers([]);
       setRoles([]);
+      setOrg1Roles([]);
       setDesignations([]);
       setScopeRows([]);
       setAssignedRoleByUserId({});
@@ -392,8 +415,18 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
   }, [orgIdNumFromShell, externalOrgs]);
 
   const assignableRoles = useMemo(
-    () => roles.filter((r) => !isLegacyLevelRoleName(r.name)),
+    () => roles.filter((r) => !isLegacyLevelRoleName(r.name) && !isSystemAdminRoleName(r.name)),
     [roles]
+  );
+  const assignableOrg1InternalRoles = useMemo(
+    () =>
+      org1Roles.filter(
+        (r) =>
+          !isLegacyLevelRoleName(r.name) &&
+          !isSystemAdminRoleName(r.name) &&
+          (r.role_type === "internal_support" || Number(r.organisation_id) === 1)
+      ),
+    [org1Roles]
   );
   const assignableRoleIdSet = useMemo(
     () =>
@@ -404,26 +437,44 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
       ),
     [assignableRoles]
   );
+  const assignableOrg1InternalRoleIdSet = useMemo(
+    () =>
+      new Set(
+        assignableOrg1InternalRoles
+          .map((r) => Number(r.id))
+          .filter((id) => Number.isFinite(id))
+      ),
+    [assignableOrg1InternalRoles]
+  );
 
   const defaultAgentRoleId = useMemo(() => {
     const role = roles.find((r) => String(r.name ?? "").trim().toLowerCase() === "agent");
     return role?.id ?? null;
   }, [roles]);
-
-  /** At least one Ezii-invited user per routing tier. Tier lives on org support level, not ticket role. */
-  const missingInvitedEziiRoles = useMemo(() => {
-    if (!isSystemAdminUser || activeOrgId == null || activeOrgId === 1) return [] as string[];
-
-    const activeInvitedScopes = scopeRows.filter(
-      (s) =>
-        s.is_active &&
-        Number(s.origin_org_id) === 1 &&
-        Number(s.scope_org_id) === activeOrgId
+  const defaultOrg1AgentRoleId = useMemo(() => {
+    const role = assignableOrg1InternalRoles.find(
+      (r) => String(r.name ?? "").trim().toLowerCase() === "agent"
     );
+    return role?.id ?? null;
+  }, [assignableOrg1InternalRoles]);
+
+  /** At least one user (customer or invited Ezii) per routing tier in tenant orgs. */
+  const missingSupportLevels = useMemo(() => {
+    if (activeOrgId == null || activeOrgId === 1) return [] as string[];
+
+    const orgUserIds = new Set<number>();
+    for (const u of users) {
+      orgUserIds.add(Number(u.user_id));
+    }
+    for (const s of scopeRows) {
+      if (s.is_active && Number(s.scope_org_id) === activeOrgId) {
+        orgUserIds.add(Number(s.user_id));
+      }
+    }
 
     const tierSlugs = new Set<string>();
-    for (const s of activeInvitedScopes) {
-      const slug = tierKeyFromUserDesignation(assignedDesignationByUserId[Number(s.user_id)]);
+    for (const uid of orgUserIds) {
+      const slug = tierKeyFromUserDesignation(assignedDesignationByUserId[uid]);
       if (slug) tierSlugs.add(slug);
     }
 
@@ -432,7 +483,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
     if (!tierSlugs.has("l2")) missing.push("L2");
     if (!tierSlugs.has("l3")) missing.push("L3");
     return missing;
-  }, [isSystemAdminUser, activeOrgId, scopeRows, assignedDesignationByUserId]);
+  }, [activeOrgId, users, scopeRows, assignedDesignationByUserId]);
 
   const recommendedInviteRoleId = useMemo(() => defaultAgentRoleId, [defaultAgentRoleId]);
 
@@ -764,7 +815,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
       if (!levelKey || !LEVEL_KEYS.includes(levelKey as (typeof LEVEL_KEYS)[number])) {
         return toast.error("Select a level (L1 / L2 / L3)");
       }
-      if (defaultAgentRoleId == null) return toast.error("Agent role not found for this organization.");
+      if (defaultOrg1AgentRoleId == null) return toast.error("Agent role not found in org 1 internal support roles.");
     } else {
       if (!invite.selectedRoleId) return toast.error("Select a role");
     }
@@ -797,7 +848,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         const inviteScopeOrgId = eziiToTenantInvite ? activeOrgId : resolved.scopeOrgId;
 
         if (eziiToTenantInvite) {
-          await setUserRoles(resolved.userId, [defaultAgentRoleId!], inviteScopeOrgId);
+          await setUserRoles(resolved.userId, [defaultOrg1AgentRoleId!], inviteScopeOrgId);
           await setUserDesignation(resolved.userId, {
             support_level_id: inviteBatchSupportLevelId!,
             organisation_id: activeOrgId,
@@ -859,15 +910,19 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
 
         const draftRoleId = rowRoleMap[uid];
         const currentRoleId = assignedRoleIdByUserId[uid] ?? null;
+        const rowRef = visibleRows.find((r) => Number(r.user_id) === uid);
+        const invitedEziiRow =
+          activeOrgId !== 1 && rowRef != null ? isEziiInvitedSectionRow(rowRef) : false;
+        const allowedRoleIdSet = invitedEziiRow ? assignableOrg1InternalRoleIdSet : assignableRoleIdSet;
         const normalizedDraftRoleId =
-          draftRoleId != null && assignableRoleIdSet.has(Number(draftRoleId))
+          draftRoleId != null && allowedRoleIdSet.has(Number(draftRoleId))
             ? Number(draftRoleId)
             : null;
         if (
           normalizedDraftRoleId != null &&
-          (!assignableRoleIdSet.has(Number(currentRoleId)) || normalizedDraftRoleId !== currentRoleId)
+          (!allowedRoleIdSet.has(Number(currentRoleId)) || normalizedDraftRoleId !== currentRoleId)
         ) {
-          const rowScopeOrgId = visibleRows.find((r) => Number(r.user_id) === uid)?.scopeOrgId;
+          const rowScopeOrgId = rowRef?.scopeOrgId;
           let effectiveScopeOrgId: number | undefined;
           if (activeOrgId === 1) {
             // Prevent backend scope inference from picking another org (e.g. tenant scoped role).
@@ -1043,10 +1098,19 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
   function renderUserTableRow(row: UserTableRow) {
     // Allow support tier assignment (L1/L2/L3) for both customer and Ezii-invited users.
     const canEditLevel = true;
+    const invitedEziiRow = activeOrgId != null && activeOrgId !== 1 && isEziiInvitedSectionRow(row);
+    const roleOptions = invitedEziiRow ? assignableOrg1InternalRoles : assignableRoles;
+    const roleOptionIdSet = new Set(
+      roleOptions
+        .map((r) => Number(r.id))
+        .filter((id) => Number.isFinite(id))
+    );
     const selectedRoleId =
       rowRoleMap[row.user_id] ??
       assignedRoleIdByUserId[row.user_id] ??
       null;
+    const normalizedSelectedRoleId =
+      selectedRoleId != null && roleOptionIdSet.has(Number(selectedRoleId)) ? Number(selectedRoleId) : null;
     const persistedLevel = tierKeyFromUserDesignation(assignedDesignationByUserId[row.user_id]);
     const selectedLevelKey =
       rowLevelMap[row.user_id] !== undefined ? rowLevelMap[row.user_id]! : persistedLevel;
@@ -1092,10 +1156,11 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                       ...prev,
                       [row.user_id]: nextLevel,
                     }));
-                    if (!nextLevel || defaultAgentRoleId == null) return;
+                    const autoAgentRoleId = invitedEziiRow ? defaultOrg1AgentRoleId : defaultAgentRoleId;
+                    if (!nextLevel || autoAgentRoleId == null) return;
                     setRowRoleMap((prev) => ({
                       ...prev,
-                      [row.user_id]: defaultAgentRoleId,
+                      [row.user_id]: autoAgentRoleId,
                     }));
                   }}
                   className="min-w-[180px] rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
@@ -1116,7 +1181,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         <td className="px-5 py-4">
           <ModifyAccessGuard disabled={!canModifyUsersScreen} message={modifyDisabledTitle}>
             <select
-              value={selectedRoleId ?? ""}
+              value={normalizedSelectedRoleId ?? ""}
               disabled={!canModifyUsersScreen}
               onChange={(e) =>
                 setRowRoleMap((prev) => ({
@@ -1127,7 +1192,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
               className="min-w-[160px] rounded-lg border border-black/10 bg-white/75 px-3 py-2 text-xs dark:border-white/10 dark:bg-white/10"
             >
               <option value="">Select role</option>
-              {assignableRoles.map((r) => (
+              {roleOptions.map((r) => (
                 <option key={r.id} value={r.id}>
                   {r.name}
                 </option>
@@ -1233,7 +1298,7 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
                   open: true,
                   query: "",
                   selectedUserIds: [],
-                  selectedRoleId: customerOrgInviteMode ? defaultAgentRoleId : recommendedInviteRoleId,
+                  selectedRoleId: customerOrgInviteMode ? defaultOrg1AgentRoleId : recommendedInviteRoleId,
                   selectedLevelKey: "",
                 }))
               }
@@ -1247,15 +1312,15 @@ export function UsersRolesPage({ orgId }: { orgId: string }) {
         </div>
       </div>
 
-      {isSystemAdminUser &&
-        activeOrgId != null &&
+      {activeOrgId != null &&
         activeOrgId !== 1 &&
-        missingInvitedEziiRoles.length > 0 ? (
+        missingSupportLevels.length > 0 ? (
         <GlassCard className="border border-amber-300/70 bg-amber-50/50 p-4 dark:border-amber-800/60 dark:bg-amber-950/25">
           <p className="text-xs leading-relaxed text-amber-950 dark:text-amber-100">
-            <span className="font-semibold">Action required:</span> For this organization, invite at least
-            one Ezii user each for <strong>L1</strong>, <strong>L2</strong>, and <strong>L3</strong>. Missing:
-            <strong> {missingInvitedEziiRoles.join(", ")}</strong>.
+            <span className="font-semibold">Action required:</span> For this organization, ensure at least one
+            user each is assigned for <strong>L1</strong>, <strong>L2</strong>, and <strong>L3</strong> (customer
+            users and invited Ezii users both count). Missing:
+            <strong> {missingSupportLevels.join(", ")}</strong>.
           </p>
         </GlassCard>
       ) : null}

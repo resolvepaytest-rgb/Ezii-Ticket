@@ -203,18 +203,13 @@ export type Team = {
   updated_at?: string;
 };
 
-export type ApplyRoleTo =
-  | "all"
-  | "reportees"
-  | "worker_type"
-  | "attribute"
-  | "customer_org"
-  | "internal_support";
+export type ApplyRoleTo = "all" | "reportees" | "worker_type" | "attribute";
 
 export type Role = {
   id: number;
   organisation_id?: number;
   name: string;
+  role_type?: "internal_support" | "customer_org";
   description?: string | null;
   is_default?: boolean;
   created_at?: string;

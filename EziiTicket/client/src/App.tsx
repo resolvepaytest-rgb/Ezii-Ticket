@@ -695,16 +695,24 @@ export default function App() {
   }, [user]);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      setProfile(null);
+      setProfileError(null);
+      return;
+    }
     setActiveOrgId((prev) => prev ?? (user.org_id ?? null));
     setProfileError(null);
+    setProfile(null);
 
+    let cancelled = false;
     void (async () => {
       try {
         const p = await getExternalUserProfile();
+        if (cancelled) return;
         setProfile(p);
         setActiveOrgId((prev) => prev ?? (p.org_id ? String(p.org_id) : user.org_id ?? null));
       } catch (e) {
+        if (cancelled) return;
         setProfileError(
           e instanceof Error ? e.message : "Failed to load user profile"
         );
@@ -712,6 +720,9 @@ export default function App() {
         setActiveOrgId((prev) => prev ?? (user.org_id ?? null));
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   useEffect(() => {
@@ -1390,6 +1401,8 @@ export default function App() {
       ? extendedProfile.date_of_joining.trim()
       : null;
 
+  const sidebarOrgProfilePending = Boolean(user && !profile && !profileError);
+
   return (
     <ThemeProvider>
       <AppToaster />
@@ -1414,6 +1427,7 @@ export default function App() {
         onLogout={handleLogout}
         sidebarOrgName={profile?.organization_name || ""}
         sidebarOrgLogoUrl={profile?.organization_logo ?? undefined}
+        sidebarOrgProfilePending={sidebarOrgProfilePending}
         sidebarItems={noAccessAssigned ? [] : sidebarItemsForShell}
         headerSearchItems={noAccessAssigned ? [] : headerSearchItems}
         activeNavKey={activeNav}

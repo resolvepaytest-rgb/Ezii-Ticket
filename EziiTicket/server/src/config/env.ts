@@ -56,7 +56,10 @@ export const env = {
   leaveApiBearer: (process.env.LEAVE_API_BEARER ?? "").trim() || null,
   /** When 0, midnight attendance → OOO sync is not scheduled. */
   attendanceOooSyncEnabled: (process.env.ATTENDANCE_OOO_SYNC_ENABLED ?? "1") !== "0",
-  /** Organisation id passed as `orgId` and used to scope `users.organisation_id` updates (default 1). */
+  /**
+   * Primary org for midnight attendance → OOO (default 1). Nightly job also runs for each other
+   * organisation that has at least one user with an active support level in that org.
+   */
   attendanceOooSyncOrgId: (() => {
     const n = Number(process.env.ATTENDANCE_OOO_SYNC_ORG_ID ?? 1);
     return Number.isFinite(n) && n > 0 ? n : 1;

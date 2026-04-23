@@ -69,6 +69,7 @@ type AgentRow = {
   id: number;
   name: string;
   email: string;
+  personType: "internal" | "customer";
   status: string;
   tier: "L1" | "L2" | "L3";
   roleLabel: string;
@@ -253,6 +254,15 @@ export function AgentsPage({ orgId }: { orgId: string }) {
           }
           return Array.from(merged.values());
         })();
+        const invitedEziiUserIdSet = new Set(
+          directoryBundle.users
+            .filter(
+              (d) =>
+                Number(d.scope_org_id) === activeOrgId &&
+                Number(d.origin_org_id) === EZII_ORG_ID
+            )
+            .map((d) => Number(d.user_id))
+        );
         setTargetUsers(usersForAgents);
         setSourceUsers(sourceUsersRes);
         setRoles(rolesRes);
@@ -322,6 +332,11 @@ export function AgentsPage({ orgId }: { orgId: string }) {
 
             const tier = inferTier(designation);
             const uid = Number(u.user_id);
+            const personType: AgentRow["personType"] =
+              activeOrgId === EZII_ORG_ID ||
+              invitedEziiUserIdSet.has(uid)
+                ? "internal"
+                : "customer";
             const metrics = metricsByUserId.get(uid);
             const workloadCurrent = metrics?.open_count ?? 0;
             const productCaps = userProductCapsByUserId.get(uid) ?? new Map<string, number | null>();
@@ -348,6 +363,7 @@ export function AgentsPage({ orgId }: { orgId: string }) {
               id: Number(u.user_id),
               name: u.name || `User ${u.user_id}`,
               email: u.email || "-",
+              personType,
               status: u.status || "active",
               tier,
               roleLabel: roleName,
@@ -808,7 +824,7 @@ export function AgentsPage({ orgId }: { orgId: string }) {
             disabled={!canModify}
             message={
               canModify
-                ? "Sync approved leave from attendance API and refresh OOO status/date range."
+                ? "Sync approved leave from attendance API and refresh OOO. Org 1: all users in the org. Other orgs: users with an assigned support level only."
                 : modifyAccessMessage
             }
           >
@@ -909,7 +925,18 @@ export function AgentsPage({ orgId }: { orgId: string }) {
                             {initials(r.name)}
                           </div>
                           <div>
-                            <div className="font-semibold text-slate-800 dark:text-slate-100">{r.name}</div>
+                            <div className="flex items-center justify-between ">
+                              <div className="font-semibold text-slate-800 dark:text-slate-100">{r.name}</div>
+                              <span
+                                className={`inline-flex rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                                  r.personType === "internal"
+                                    ? "bg-violet-100 text-violet-700 dark:bg-violet-400/20 dark:text-violet-300"
+                                    : "bg-emerald-100 text-emerald-700 dark:bg-emerald-400/20 dark:text-emerald-300"
+                                }`}
+                              >
+                                {r.personType === "internal" ? "Internal" : "Customer"}
+                              </span>
+                            </div>
                             <div className="text-[11px] text-slate-500 dark:text-slate-400">{r.email}</div>
                           </div>
                         </div>

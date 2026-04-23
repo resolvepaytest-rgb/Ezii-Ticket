@@ -15,6 +15,8 @@ type SidebarProps = {
   orgName?: string;
   orgSubtitle?: string;
   orgLogoUrl?: string;
+  /** When true, org logo and name show a skeleton with wave shimmer until profile loads. */
+  orgProfilePending?: boolean;
   items?: SidebarItem[];
   activeKey?: string;
   onSelect?: (key: string) => void;
@@ -24,10 +26,32 @@ type SidebarProps = {
   className?: string;
 };
 
+function SidebarOrgSkeleton() {
+  const bar = "org-sidebar-wave-bar bg-gradient-to-r from-transparent via-white/50 to-transparent dark:via-white/18";
+  return (
+    <div className="mb-3 px-2 py-2 text-center" aria-busy="true" aria-label="Loading organization">
+      <div className="mx-auto">
+        <div className="relative mx-auto h-16 w-full max-w-[9.5rem] overflow-hidden rounded-xl bg-muted/80 ring-1 ring-black/10 dark:bg-white/10 dark:ring-white/10">
+          <div className={cn(bar, "rounded-xl")} />
+        </div>
+      </div>
+      <div className="mt-2 space-y-2 px-1">
+        <div className="relative mx-auto h-3.5 w-[88%] overflow-hidden rounded-md bg-muted/80 ring-1 ring-black/5 dark:bg-white/10">
+          <div className={cn(bar, "rounded-md")} style={{ animationDelay: "0.08s" }} />
+        </div>
+        <div className="relative mx-auto h-2.5 w-[52%] overflow-hidden rounded-md bg-muted/65 dark:bg-white/5">
+          <div className={cn(bar, "rounded-md")} style={{ animationDelay: "0.22s" }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Sidebar({
   orgName = "",
   orgSubtitle = "",
   orgLogoUrl,
+  orgProfilePending = false,
   items = getEtsSystemAdminSidebarItems(),
   activeKey,
   onSelect,
@@ -45,25 +69,29 @@ export function Sidebar({
         className
       )}
     >
-      <div className="mb-3 px-2 py-2 text-center">
-        <div className="mx-auto">
-          {orgLogoUrl ? (
-            <img
-              src={orgLogoUrl}
-              alt={orgName}
-              className="mx-auto h-16 w-auto max-w-full object-contain dark:rounded-md dark:bg-white/95 dark:px-2 dark:py-1"
-            />
-          ) : (
-            <div className="mx-auto h-14 w-14 rounded-xl bg-primary/20 ring-1 ring-black/10 dark:ring-white/10" />
-          )}
+      {orgProfilePending ? (
+        <SidebarOrgSkeleton />
+      ) : (
+        <div className="mb-3 px-2 py-2 text-center">
+          <div className="mx-auto">
+            {orgLogoUrl ? (
+              <img
+                src={orgLogoUrl}
+                alt={orgName}
+                className="mx-auto h-16 w-auto max-w-full object-contain dark:rounded-md dark:bg-white/95 dark:px-2 dark:py-1"
+              />
+            ) : (
+              <div className="mx-auto h-14 w-14 rounded-xl bg-primary/20 ring-1 ring-black/10 dark:ring-white/10" />
+            )}
+          </div>
+          <div className="mt-2 min-w-0">
+            <div className="truncate text-sm font-semibold leading-tight">{orgName}</div>
+            {orgSubtitle ? (
+              <div className="truncate text-xs text-muted-foreground">{orgSubtitle}</div>
+            ) : null}
+          </div>
         </div>
-        <div className="mt-2 min-w-0">
-          <div className="truncate text-sm font-semibold leading-tight">{orgName}</div>
-          {orgSubtitle ? (
-            <div className="truncate text-xs text-muted-foreground">{orgSubtitle}</div>
-          ) : null}
-        </div>
-      </div>
+      )}
 
       <div className="my-3 h-px w-full bg-black/10 dark:bg-white/10" />
 

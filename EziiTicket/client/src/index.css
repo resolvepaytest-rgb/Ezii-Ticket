@@ -224,3 +224,30 @@ body {
 .roles-toggle-checkbox:active + .roles-toggle-slider::before {
   transform: translateX(0);
 }
+
+/* Sidebar org logo / name loading (shimmer wave). */
+@keyframes org-sidebar-wave {
+  0% {
+    left: -55%;
+  }
+  100% {
+    left: 100%;
+  }
+}
+
+.org-sidebar-wave-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 48%;
+  left: -55%;
+  animation: org-sidebar-wave 1.35s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .org-sidebar-wave-bar {
+    animation: none;
+    left: 26%;
+    opacity: 0.45;
+  }
+}

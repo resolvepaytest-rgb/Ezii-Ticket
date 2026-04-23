@@ -58,6 +58,11 @@ async function ensureDefaultRoles(organisationId: bigint) {
   // Note: for now this is data-only (Option A). Authorization is not yet derived from these fields.
   const internalSupportDefaultRoles = [
     [
+      "org_admin",
+      "Customer org admin; can access org tickets",
+      permissionsJsonWithScreen({}, false),
+    ],
+    [
       "agent",
       "Support agent; workspace access is defined by role and routing stage by support level",
       permissionsJsonWithScreenAgentTier({}),
@@ -90,12 +95,25 @@ async function ensureDefaultRoles(organisationId: bigint) {
   const rolesForOrg =
     organisationId === BigInt(1) ? internalSupportDefaultRoles : customerOrgDefaultRoles;
 
+  const defaultRoleType: "internal_support" | "customer_org" =
+    organisationId === BigInt(1) ? "internal_support" : "customer_org";
+
   for (const [name, description, permissionsJson] of rolesForOrg) {
+    const key = String(name ?? "").trim().toLowerCase().replace(/_/g, " ").replace(/\s+/g, " ");
+    const roleType: "internal_support" | "customer_org" =
+      key === "customer"
+        ? "customer_org"
+        : key === "org admin"
+          ? organisationId === BigInt(1)
+            ? "internal_support"
+            : "customer_org"
+          : defaultRoleType;
     await pool.query(
-      `insert into roles (organisation_id, name, description, permissions_json, is_default)
-       values ($1,$2,$3,$4::jsonb,true)
+      `insert into roles (organisation_id, name, description, role_type, permissions_json, is_default)
+       values ($1,$2,$3,$4,$5::jsonb,true)
        on conflict (organisation_id, name) do update
          set is_default = true,
+            role_type = excluded.role_type,
              description = case
                when roles.permissions_json is null or roles.permissions_json = '{}'::jsonb
                  then excluded.description
@@ -106,7 +124,7 @@ async function ensureDefaultRoles(organisationId: bigint) {
                  then excluded.permissions_json
                else roles.permissions_json
              end`,
-      [organisationId, name, description, permissionsJson]
+      [organisationId, name, description, roleType, permissionsJson]
     );
   }
 
@@ -116,7 +134,7 @@ async function ensureDefaultRoles(organisationId: bigint) {
       `update roles
        set is_default = false
        where organisation_id = $1
-         and lower(regexp_replace(trim(replace(name, '_', ' ')), '\s+', ' ', 'g')) in ('customer', 'org admin')`,
+         and lower(regexp_replace(trim(replace(name, '_', ' ')), '\s+', ' ', 'g')) in ('customer')`,
       [organisationId]
     );
   } else {

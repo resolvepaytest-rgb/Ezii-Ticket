@@ -15,6 +15,7 @@ const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
  * POST /admin/organisations/:id/attendance-ooo-sync
  * Pulls leave from `LEAVE_BASE_URL` `/api/attendance-sync?startDate=&endDate=` and updates
  * `users.out_of_office`, `ooo_start_date`, `ooo_end_date`.
+ * Org 1: all users in the organisation. Other orgs: only users with an active support level in that org.
  * Query: `startDate`, `endDate` (YYYY-MM-DD). Either may be omitted — defaults to server local today.
  * Legacy: `date=YYYY-MM-DD` sets both start and end when neither is provided.
  */
